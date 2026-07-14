@@ -1096,6 +1096,12 @@ tbody tr:hover {
   color: var(--warning);
 }
 
+.activity-action.AGENT_UPDATED {
+  border-color: rgba(246, 201, 69, 0.48);
+  background: rgba(246, 201, 69, 0.09);
+  color: var(--warning);
+}
+
 .status-change {
   border-color: var(--border-soft);
   color: var(--text-primary);
@@ -1606,8 +1612,8 @@ tbody tr:hover {
   z-index: 2001;
   display: flex;
   flex-direction: column;
-  width: 430px;
-  max-width: calc(100vw - 28px);
+  width: 520px;
+  max-width: 92vw;
   height: 100vh;
   border-left: 1px solid var(--border-strong);
   background: #111313;
@@ -1691,44 +1697,56 @@ tbody tr:hover {
 .agent-drawer-content {
   flex: 1;
   min-height: 0;
-  padding: 18px;
+  padding: 22px 22px 108px;
   overflow-y: auto;
   background: #0d0f0f;
 }
 
 .drawer-section {
-  padding: 16px;
+  padding: 19px;
   border: 1px solid var(--border);
   background: var(--bg-panel);
   box-shadow: inset 3px 0 0 rgba(219, 229, 43, 0.22);
 }
 
 .drawer-section + .drawer-section {
-  margin-top: 14px;
+  margin-top: 18px;
 }
 
 .drawer-section-title {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 9px;
-  margin-bottom: 14px;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding-left: 12px;
   color: var(--accent);
+}
+
+.drawer-section-title::before {
+  position: absolute;
+  left: 0;
+  width: 3px;
+  height: 22px;
+  background: var(--accent);
+  content: "";
+  box-shadow: 0 0 10px rgba(219, 229, 43, 0.22);
 }
 
 .drawer-section-title h3 {
   margin: 0;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 950;
-  letter-spacing: 0.8px;
+  letter-spacing: 1px;
   text-transform: uppercase;
 }
 
 .drawer-field {
   display: grid;
-  grid-template-columns: 120px minmax(0, 1fr);
-  gap: 14px;
-  padding: 11px 0;
+  grid-template-columns: 145px minmax(0, 1fr);
+  gap: 18px;
+  padding: 13px 0;
   border-top: 1px solid var(--border-soft);
 }
 
@@ -1738,7 +1756,7 @@ tbody tr:hover {
 
 .drawer-field span {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 850;
   line-height: 1.4;
   text-transform: uppercase;
@@ -1817,16 +1835,21 @@ tbody tr:hover {
 
 .drawer-risk-score {
   display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(246, 201, 69, 0.28);
+  background: rgba(246, 201, 69, 0.07);
+}
+
+.drawer-risk-meta {
+  display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px 16px;
   align-items: end;
-  padding: 14px;
-  border: 1px solid rgba(255, 138, 31, 0.28);
-  background: var(--risk-soft);
 }
 
-.drawer-risk-score span,
-.drawer-risk-score small {
+.drawer-risk-meta span,
+.drawer-risk-meta small {
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 850;
@@ -1834,12 +1857,50 @@ tbody tr:hover {
   text-transform: uppercase;
 }
 
-.drawer-risk-score strong {
+.drawer-risk-meta strong {
   grid-row: span 2;
-  color: var(--risk);
-  font-size: 42px;
+  color: var(--warning);
+  font-size: 44px;
   font-weight: 950;
   line-height: 0.95;
+}
+
+.drawer-risk-bar {
+  height: 9px;
+  overflow: hidden;
+  background: #343737;
+}
+
+.drawer-risk-bar-fill {
+  height: 100%;
+  background: var(--warning);
+  box-shadow: 0 0 10px rgba(246, 201, 69, 0.22);
+}
+
+.drawer-risk-score.risk-medium {
+  border-color: rgba(255, 138, 31, 0.34);
+  background: var(--risk-soft);
+}
+
+.drawer-risk-score.risk-medium .drawer-risk-meta strong {
+  color: var(--risk);
+}
+
+.drawer-risk-score.risk-medium .drawer-risk-bar-fill {
+  background: var(--risk);
+}
+
+.drawer-risk-score.risk-high {
+  border-color: rgba(255, 104, 31, 0.42);
+  background: rgba(255, 104, 31, 0.12);
+}
+
+.drawer-risk-score.risk-high .drawer-risk-meta strong {
+  color: #ff681f;
+}
+
+.drawer-risk-score.risk-high .drawer-risk-bar-fill {
+  background: #ff681f;
 }
 
 .drawer-policy-message {
@@ -1850,8 +1911,35 @@ tbody tr:hover {
   line-height: 1.45;
 }
 
+.drawer-agent-message {
+  padding: 0 0 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
 .drawer-policy-message.error {
   color: var(--danger);
+}
+
+.drawer-agent-message.error {
+  color: var(--danger);
+}
+
+.drawer-mode-helper {
+  margin: -5px 0 16px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  background: rgba(219, 229, 43, 0.07);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.read-only-during-agent-edit {
+  opacity: 0.82;
 }
 
 .policy-risk-threshold {
@@ -1867,14 +1955,14 @@ tbody tr:hover {
 .policy-tag-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
+  gap: 9px;
 }
 
 .policy-tag {
   display: inline-flex;
   align-items: center;
-  min-height: 28px;
-  padding: 6px 9px;
+  min-height: 30px;
+  padding: 7px 10px;
   border: 1px solid rgba(132, 224, 68, 0.32);
   background: var(--success-soft);
   color: var(--success);
@@ -1930,31 +2018,37 @@ tbody tr:hover {
   transform: translateY(-1px);
 }
 
+.agent-form,
 .policy-form {
   display: grid;
-  gap: 13px;
+  gap: 16px;
 }
 
+.agent-form label,
 .policy-form label {
   display: grid;
-  gap: 7px;
+  gap: 9px;
 }
 
+.agent-form label > span,
 .policy-form label > span,
 .policy-checkbox span {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 900;
   letter-spacing: 0.7px;
   text-transform: uppercase;
 }
 
+.agent-form input,
+.agent-form select,
+.agent-form textarea,
 .policy-form input,
 .policy-form select,
 .policy-form textarea {
   width: 100%;
   min-height: 40px;
-  padding: 10px 11px;
+  padding: 11px 12px;
   border: 1px solid var(--border);
   background: var(--bg-input);
   color: var(--text-primary);
@@ -1966,22 +2060,52 @@ tbody tr:hover {
     background 0.18s ease;
 }
 
+.agent-form textarea,
 .policy-form textarea {
   min-height: 82px;
   resize: vertical;
 }
 
+.agent-form input:hover,
+.agent-form select:hover,
+.agent-form textarea:hover,
 .policy-form input:hover,
 .policy-form select:hover,
 .policy-form textarea:hover {
   background: var(--bg-panel-elevated);
 }
 
+.agent-form input:focus,
+.agent-form select:focus,
+.agent-form textarea:focus,
 .policy-form input:focus,
 .policy-form select:focus,
 .policy-form textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(219, 229, 43, 0.09);
+}
+
+.readonly-agent-id {
+  display: grid;
+  gap: 9px;
+  padding: 13px;
+  border: 1px solid var(--border-soft);
+  background: #121414;
+}
+
+.readonly-agent-id span {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.readonly-agent-id strong {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 850;
+  letter-spacing: 0.5px;
 }
 
 .policy-form small {
@@ -2006,10 +2130,11 @@ tbody tr:hover {
   accent-color: var(--accent);
 }
 
+.agent-form-grid,
 .policy-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 14px;
 }
 
 .policy-form-actions {
@@ -2051,15 +2176,21 @@ tbody tr:hover {
 }
 
 .agent-drawer-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
   display: flex;
-  gap: 10px;
-  padding: 16px 18px;
+  gap: 12px;
+  flex: 0 0 auto;
+  padding: 17px 22px 20px;
   border-top: 1px solid var(--border);
-  background: var(--bg-panel);
+  background: #111313;
+  box-shadow: 0 -12px 24px rgba(0, 0, 0, 0.28);
 }
 
 .agent-drawer-footer button {
   flex: 1;
+  min-width: 0;
   min-height: 42px;
   padding: 10px 12px;
   border: 1px solid var(--border);
@@ -2069,6 +2200,7 @@ tbody tr:hover {
   font-weight: 950;
   letter-spacing: 0.8px;
   text-transform: uppercase;
+  white-space: nowrap;
   cursor: pointer;
   transition:
     background 0.18s ease,
@@ -2077,7 +2209,7 @@ tbody tr:hover {
     transform 0.18s ease;
 }
 
-.agent-drawer-footer button:hover {
+.agent-drawer-footer button:hover:not(:disabled) {
   background: var(--bg-panel-hover);
   color: var(--text-primary);
   transform: translateY(-1px);
@@ -2090,6 +2222,34 @@ tbody tr:hover {
 
 .drawer-edit-button:hover {
   background: var(--accent-soft);
+}
+
+.drawer-save-button {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #080909;
+}
+
+.drawer-save-button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.drawer-cancel-button {
+  border-color: var(--border-strong);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.drawer-cancel-button:hover:not(:disabled) {
+  border-color: var(--text-muted);
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+
+.drawer-save-button:disabled,
+.drawer-cancel-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .drawer-disable-button {

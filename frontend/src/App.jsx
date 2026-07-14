@@ -60,7 +60,23 @@ function formatActionLabel(action) {
     return "Agent enabled";
   }
 
+  if (action === "AGENT_UPDATED") {
+    return "Agent updated";
+  }
+
   return "Status changed";
+}
+
+function getRiskTier(score) {
+  if (score >= 80) {
+    return "high";
+  }
+
+  if (score >= 60) {
+    return "medium";
+  }
+
+  return "low";
 }
 
 async function fetchActivityLogs() {
@@ -83,6 +99,19 @@ async function fetchAgentPolicy(agentId) {
   }
 
   return response.json();
+}
+
+function createAgentForm(agent) {
+  return {
+    name: agent?.name ?? "",
+    description: agent?.description ?? "",
+    agent_type: agent?.agent_type ?? "",
+    owner_name: agent?.owner_name ?? "",
+    owner_team: agent?.owner_team ?? "",
+    integration_status: agent?.integration_status ?? "demo",
+    risk_score: agent?.risk_score ?? 0,
+    endpoint_url: agent?.endpoint_url ?? ""
+  };
 }
 
 function createPolicyForm(policy) {
@@ -147,6 +176,19 @@ function App() {
   const [activeView, setActiveView] = useState("overview");
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [activityLogs, setActivityLogs] = useState([]);
+  const [isEditingAgent, setIsEditingAgent] = useState(false);
+  const [agentSaving, setAgentSaving] = useState(false);
+  const [agentEditError, setAgentEditError] = useState("");
+  const [agentForm, setAgentForm] = useState({
+    name: "",
+    description: "",
+    agent_type: "",
+    owner_name: "",
+    owner_team: "",
+    integration_status: "demo",
+    risk_score: 0,
+    endpoint_url: ""
+  });
   const [selectedPolicy, setSelectedPolicy] = useState(null);
   const [policyLoading, setPolicyLoading] = useState(false);
   const [policyError, setPolicyError] = useState("");
@@ -294,8 +336,12 @@ function App() {
     }
   };
 
-  const openAgentDetails = async (agent) => {
+  const openAgentDetails = async (agent, options = {}) => {
     setSelectedAgent(agent);
+    setAgentForm(createAgentForm(agent));
+    setIsEditingAgent(Boolean(options.edit));
+    setIsEditingPolicy(false);
+    setAgentEditError("");
     setOpenMenuId(null);
     setPolicyLoading(true);
     setPolicyError("");
@@ -314,6 +360,106 @@ function App() {
     }
   };
 
+  const closeAgentDrawer = () => {
+    if (agentSaving || policySaving) {
+      return;
+    }
+
+    setSelectedAgent(null);
+    setIsEditingAgent(false);
+    setIsEditingPolicy(false);
+    setAgentEditError("");
+    setPolicyError("");
+  };
+
+  const handleAgentFormChange = (field, value) => {
+    setAgentForm((current) => ({
+      ...current,
+      [field]: value
+    }));
+  };
+
+  const startAgentEdit = () => {
+    if (!selectedAgent) {
+      return;
+    }
+
+    setAgentForm(createAgentForm(selectedAgent));
+    setAgentEditError("");
+    setPolicyError("");
+    setIsEditingPolicy(false);
+    setIsEditingAgent(true);
+  };
+
+  const cancelAgentEdit = () => {
+    setAgentForm(createAgentForm(selectedAgent));
+    setAgentEditError("");
+    setIsEditingAgent(false);
+  };
+
+  const saveAgent = async () => {
+    if (!selectedAgent) {
+      return;
+    }
+
+    setAgentSaving(true);
+    setAgentEditError("");
+
+    try {
+      const endpointUrl = agentForm.endpoint_url.trim();
+      const response = await fetch(
+        `http://localhost:5000/api/agents/${selectedAgent.id}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            name: agentForm.name,
+            description: agentForm.description,
+            agent_type: agentForm.agent_type,
+            owner_name: agentForm.owner_name,
+            owner_team: agentForm.owner_team,
+            integration_status: agentForm.integration_status,
+            risk_score: Number(agentForm.risk_score),
+            endpoint_url: endpointUrl === "" ? null : endpointUrl
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+
+        throw new Error(
+          errorBody.details ||
+          errorBody.error ||
+          "Failed to update agent"
+        );
+      }
+
+      const updatedAgent = await response.json();
+
+      setAgents((previous) =>
+        previous.map((agent) =>
+          agent.id === updatedAgent.id
+            ? updatedAgent
+            : agent
+        )
+      );
+      setSelectedAgent(updatedAgent);
+      setAgentForm(createAgentForm(updatedAgent));
+      setIsEditingAgent(false);
+
+      const logs = await fetchActivityLogs();
+      setActivityLogs(logs);
+    } catch (error) {
+      console.error(error);
+      setAgentEditError(error.message || "Could not save agent.");
+    } finally {
+      setAgentSaving(false);
+    }
+  };
+
   const handlePolicyFormChange = (field, value) => {
     setPolicyForm((current) => ({
       ...current,
@@ -327,6 +473,8 @@ function App() {
     }
 
     setPolicyError("");
+    setAgentEditError("");
+    setIsEditingAgent(false);
     setPolicyForm(createPolicyForm(selectedPolicy));
     setIsEditingPolicy(true);
   };
@@ -711,7 +859,14 @@ function App() {
                             >
                               View details
                             </button>
-                             <button type="button">Edit agent</button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                openAgentDetails(agent, { edit: true });
+                              }}
+                            >
+                              Edit agent
+                            </button>
 
                              {agent.status === "disabled" ? (
                             <button
@@ -973,7 +1128,7 @@ function App() {
       <>
         <div
           className="drawer-overlay"
-          onClick={() => setSelectedAgent(null)}
+          onClick={closeAgentDrawer}
         />
 
         <aside className="agent-drawer" aria-label="Agent details">
@@ -990,18 +1145,146 @@ function App() {
               className="drawer-close-button"
               type="button"
               aria-label="Close agent details"
-              onClick={() => setSelectedAgent(null)}
+              onClick={closeAgentDrawer}
             >
               <X size={20} strokeWidth={2.2} />
             </button>
           </div>
 
           <div className="agent-drawer-content">
+            {isEditingAgent ? (
             <section className="drawer-section">
               <div className="drawer-section-title">
                 <ServerCog size={17} strokeWidth={2.2} />
-                <h3>Identity</h3>
+                <h3>Agent Configuration</h3>
               </div>
+
+              {agentEditError && (
+                <div className="drawer-agent-message error">
+                  {agentEditError}
+                </div>
+              )}
+
+              <div className="agent-form">
+                <div className="readonly-agent-id">
+                  <span>Agent ID</span>
+                  <strong>{selectedAgent.agent_id}</strong>
+                </div>
+
+                <label>
+                  <span>Name</span>
+                  <input
+                    type="text"
+                    value={agentForm.name}
+                    onChange={(event) =>
+                      handleAgentFormChange("name", event.target.value)
+                    }
+                  />
+                </label>
+
+                <label>
+                  <span>Description</span>
+                  <textarea
+                    rows="3"
+                    value={agentForm.description}
+                    onChange={(event) =>
+                      handleAgentFormChange("description", event.target.value)
+                    }
+                  />
+                </label>
+
+                <label>
+                  <span>Agent type</span>
+                  <input
+                    type="text"
+                    value={agentForm.agent_type}
+                    onChange={(event) =>
+                      handleAgentFormChange("agent_type", event.target.value)
+                    }
+                  />
+                </label>
+
+                <div className="agent-form-grid">
+                  <label>
+                    <span>Owner name</span>
+                    <input
+                      type="text"
+                      value={agentForm.owner_name}
+                      onChange={(event) =>
+                        handleAgentFormChange("owner_name", event.target.value)
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    <span>Owner team</span>
+                    <input
+                      type="text"
+                      value={agentForm.owner_team}
+                      onChange={(event) =>
+                        handleAgentFormChange("owner_team", event.target.value)
+                      }
+                    />
+                  </label>
+                </div>
+
+                <div className="agent-form-grid">
+                  <label>
+                    <span>Integration status</span>
+                    <select
+                      value={agentForm.integration_status}
+                      onChange={(event) =>
+                        handleAgentFormChange(
+                          "integration_status",
+                          event.target.value
+                        )
+                      }
+                    >
+                      <option value="connected">connected</option>
+                      <option value="demo">demo</option>
+                      <option value="disconnected">disconnected</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    <span>Risk score</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={agentForm.risk_score}
+                      onChange={(event) =>
+                        handleAgentFormChange("risk_score", event.target.value)
+                      }
+                    />
+                  </label>
+                </div>
+
+                <label>
+                  <span>Endpoint URL</span>
+                  <input
+                    type="text"
+                    value={agentForm.endpoint_url}
+                    onChange={(event) =>
+                      handleAgentFormChange("endpoint_url", event.target.value)
+                    }
+                  />
+                </label>
+              </div>
+            </section>
+            ) : (
+            <>
+            <section className="drawer-section">
+              <div className="drawer-section-title">
+                <ServerCog size={17} strokeWidth={2.2} />
+                <h3>Agent Configuration</h3>
+              </div>
+
+              {isEditingPolicy && (
+                <p className="drawer-mode-helper">
+                  Agent details remain read-only while editing policy.
+                </p>
+              )}
 
               <div className="drawer-field">
                 <span>Agent name</span>
@@ -1091,18 +1374,43 @@ function App() {
                 <h3>Risk and Governance</h3>
               </div>
 
-              <div className="drawer-risk-score">
-                <span>Risk score</span>
-                <strong>{selectedAgent.risk_score}</strong>
-                <small>out of 100</small>
+              <div
+                className={`drawer-risk-score risk-${getRiskTier(
+                  selectedAgent.risk_score
+                )}`}
+              >
+                <div className="drawer-risk-meta">
+                  <span>Risk score</span>
+                  <strong>{selectedAgent.risk_score}</strong>
+                  <small>out of 100</small>
+                </div>
+
+                <div className="drawer-risk-bar" aria-hidden="true">
+                  <div
+                    className="drawer-risk-bar-fill"
+                    style={{ width: `${selectedAgent.risk_score}%` }}
+                  ></div>
+                </div>
               </div>
             </section>
+            </>
+            )}
 
-            <section className="drawer-section">
+            <section
+              className={`drawer-section ${
+                isEditingAgent ? "read-only-during-agent-edit" : ""
+              }`}
+            >
               <div className="drawer-section-title">
                 <ShieldAlert size={17} strokeWidth={2.2} />
                 <h3>Policy and Governance</h3>
               </div>
+
+              {isEditingAgent && (
+                <p className="drawer-mode-helper">
+                  Policy remains read-only while editing the agent.
+                </p>
+              )}
 
               {policyLoading ? (
                 <div className="drawer-policy-message">
@@ -1226,28 +1534,10 @@ function App() {
                         <small>Enter actions separated by commas.</small>
                       </label>
 
-                      <div className="policy-form-actions">
-                        <button
-                          type="button"
-                          className="policy-save-button"
-                          disabled={policySaving}
-                          onClick={savePolicy}
-                        >
-                          {policySaving ? "Saving..." : "Save Policy"}
-                        </button>
-
-                        <button
-                          type="button"
-                          className="policy-cancel-button"
-                          disabled={policySaving}
-                          onClick={cancelPolicyEdit}
-                        >
-                          Cancel
-                        </button>
-                      </div>
                     </div>
                   ) : (
                     <>
+                      {!isEditingAgent && (
                       <div className="policy-section-actions">
                         <button
                           type="button"
@@ -1257,6 +1547,7 @@ function App() {
                           Edit Policy
                         </button>
                       </div>
+                      )}
 
                       <div className="drawer-field">
                         <span>Policy name</span>
@@ -1342,7 +1633,53 @@ function App() {
           </div>
 
           <div className="agent-drawer-footer">
-            <button type="button" className="drawer-edit-button">
+            {isEditingAgent ? (
+            <>
+            <button
+              type="button"
+              className="drawer-cancel-button"
+              disabled={agentSaving}
+              onClick={cancelAgentEdit}
+            >
+              Cancel Agent
+            </button>
+
+            <button
+              type="button"
+              className="drawer-save-button"
+              disabled={agentSaving}
+              onClick={saveAgent}
+            >
+              {agentSaving ? "Saving..." : "Save Agent"}
+            </button>
+            </>
+            ) : isEditingPolicy ? (
+            <>
+            <button
+              type="button"
+              className="drawer-cancel-button"
+              disabled={policySaving}
+              onClick={cancelPolicyEdit}
+            >
+              Cancel Policy
+            </button>
+
+            <button
+              type="button"
+              className="drawer-save-button"
+              disabled={policySaving}
+              onClick={savePolicy}
+            >
+              {policySaving ? "Saving..." : "Save Policy"}
+            </button>
+            </>
+            ) : (
+            <>
+            <button
+              type="button"
+              className="drawer-edit-button"
+              onClick={startAgentEdit}
+            >
               Edit Agent
             </button>
 
@@ -1372,6 +1709,8 @@ function App() {
               >
                 Disable Agent
               </button>
+            )}
+            </>
             )}
           </div>
         </aside>

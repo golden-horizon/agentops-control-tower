@@ -13,6 +13,7 @@ app.use(express.json());
 
 const PORT = 5000;
 const VALID_AGENT_STATUSES = ["active", "disabled", "offline"];
+const VALID_INTEGRATION_STATUSES = ["connected", "demo", "disconnected"];
 const VALID_ENFORCEMENT_STATUSES = ["draft", "enforced", "disabled"];
 const VALID_APPROVAL_STATUSES = ["pending", "approved", "rejected"];
 const VALID_APPROVAL_DECISIONS = ["approved", "rejected"];
@@ -66,6 +67,55 @@ function validatePolicyPayload(policy) {
 
   if (!VALID_ENFORCEMENT_STATUSES.includes(policy.enforcement_status)) {
     return "enforcement_status must be draft, enforced, or disabled";
+  }
+
+  return null;
+}
+
+function validateAgentPayload(agent) {
+  if (
+    typeof agent.name !== "string" ||
+    agent.name.trim().length === 0
+  ) {
+    return "name must be a non-empty string";
+  }
+
+  if (typeof agent.description !== "string") {
+    return "description must be a string";
+  }
+
+  if (
+    typeof agent.agent_type !== "string" ||
+    agent.agent_type.trim().length === 0
+  ) {
+    return "agent_type must be a non-empty string";
+  }
+
+  if (typeof agent.owner_name !== "string") {
+    return "owner_name must be a string";
+  }
+
+  if (typeof agent.owner_team !== "string") {
+    return "owner_team must be a string";
+  }
+
+  if (!VALID_INTEGRATION_STATUSES.includes(agent.integration_status)) {
+    return "integration_status must be connected, demo, or disconnected";
+  }
+
+  if (
+    !Number.isInteger(agent.risk_score) ||
+    agent.risk_score < 0 ||
+    agent.risk_score > 100
+  ) {
+    return "risk_score must be an integer between 0 and 100";
+  }
+
+  if (
+    agent.endpoint_url !== null &&
+    typeof agent.endpoint_url !== "string"
+  ) {
+    return "endpoint_url must be a string or null";
   }
 
   return null;
@@ -178,6 +228,132 @@ app.get("/api/agents", async (req, res) => {
       message: "Could not retrieve agents",
       error: error.message
     });
+  }
+});
+
+app.put("/api/agents/:id", async (req, res) => {
+  const validationError = validateAgentPayload(req.body);
+
+  if (validationError) {
+    return res.status(400).json({
+      error: validationError
+    });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    const { id } = req.params;
+    const {
+      name,
+      description,
+      agent_type,
+      owner_name,
+      owner_team,
+      integration_status,
+      risk_score,
+      endpoint_url
+    } = req.body;
+
+    await client.query("BEGIN");
+
+    const currentAgent = await client.query(
+      `
+      SELECT id, agent_id, name, status
+      FROM agents
+      WHERE id = $1
+      `,
+      [id]
+    );
+
+    if (currentAgent.rows.length === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        error: "Agent not found"
+      });
+    }
+
+    const updatedAgent = await client.query(
+      `
+      UPDATE agents
+      SET name = $1,
+          description = $2,
+          agent_type = $3,
+          owner_name = $4,
+          owner_team = $5,
+          integration_status = $6,
+          risk_score = $7,
+          endpoint_url = $8,
+          updated_at = NOW()
+      WHERE id = $9
+      RETURNING
+        id,
+        agent_id,
+        name,
+        description,
+        agent_type,
+        owner_name,
+        owner_team,
+        status,
+        integration_status,
+        risk_score,
+        endpoint_url,
+        created_at,
+        updated_at
+      `,
+      [
+        name.trim(),
+        description,
+        agent_type.trim(),
+        owner_name,
+        owner_team,
+        integration_status,
+        risk_score,
+        endpoint_url,
+        id
+      ]
+    );
+
+    await client.query(
+      `
+      INSERT INTO activity_logs (
+        agent_id,
+        action,
+        previous_status,
+        new_status,
+        performed_by,
+        details
+      )
+      VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+      `,
+      [
+        id,
+        "AGENT_UPDATED",
+        null,
+        updatedAgent.rows[0].status,
+        "Navid",
+        JSON.stringify({
+          agent_name: updatedAgent.rows[0].name,
+          agent_external_id: currentAgent.rows[0].agent_id,
+          source: "AgentOps Control Center"
+        })
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    res.json(updatedAgent.rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Agent update failed:", error);
+
+    res.status(500).json({
+      error: "Failed to update agent",
+      details: error.message
+    });
+  } finally {
+    client.release();
   }
 });
 

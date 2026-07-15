@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import {
   Activity,
@@ -51,6 +51,56 @@ function formatActivityTime(value) {
   });
 }
 
+function formatLastSeen(value) {
+  if (!value) {
+    return "Never";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString();
+}
+
+function formatResponseTime(value) {
+  return value === null || value === undefined ? "—" : `${value} ms`;
+}
+
+function formatHealthLabel(status = "unknown") {
+  const labels = {
+    healthy: "Healthy",
+    delayed: "Delayed",
+    offline: "Offline",
+    unknown: "Unknown"
+  };
+
+  return labels[status] ?? labels.unknown;
+}
+
+function formatViolationType(value = "") {
+  const words = value
+    .split("_")
+    .map((word) => word.toLowerCase())
+    .join(" ");
+
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function formatViolationDetails(details) {
+  if (!details || typeof details !== "object" || Array.isArray(details)) {
+    return "No additional details recorded.";
+  }
+
+  if (details.reason) {
+    return details.reason;
+  }
+
+  return JSON.stringify(details);
+}
+
 function formatActionLabel(action) {
   if (action === "AGENT_DISABLED") {
     return "Agent disabled";
@@ -62,6 +112,22 @@ function formatActionLabel(action) {
 
   if (action === "AGENT_UPDATED") {
     return "Agent updated";
+  }
+
+  if (action === "AGENT_HEARTBEAT_UPDATED") {
+    return "Heartbeat updated";
+  }
+
+  if (action === "POLICY_VIOLATION_DETECTED") {
+    return "Policy violation detected";
+  }
+
+  if (action === "POLICY_VIOLATION_INVESTIGATING") {
+    return "Violation investigating";
+  }
+
+  if (action === "POLICY_VIOLATION_RESOLVED") {
+    return "Violation resolved";
   }
 
   return "Status changed";
@@ -111,6 +177,20 @@ function createAgentForm(agent) {
     integration_status: agent?.integration_status ?? "demo",
     risk_score: agent?.risk_score ?? 0,
     endpoint_url: agent?.endpoint_url ?? ""
+  };
+}
+
+function createRegistrationForm() {
+  return {
+    agent_id: "",
+    name: "",
+    description: "",
+    agent_type: "",
+    owner_name: "",
+    owner_team: "",
+    integration_status: "demo",
+    risk_score: 50,
+    endpoint_url: ""
   };
 }
 
@@ -168,12 +248,32 @@ async function fetchApprovalRequests(filter) {
   return response.json();
 }
 
+async function fetchPolicyViolations(filter) {
+  const url =
+    filter === "all"
+      ? "http://localhost:5000/api/policy-violations"
+      : `http://localhost:5000/api/policy-violations?status=${filter}`;
+
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error("Could not load policy violations");
+  }
+
+  return response.json();
+}
+
 function App() {
   const [agents, setAgents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [openMenuId, setOpenMenuId] = useState(null);
   const [activeView, setActiveView] = useState("overview");
+  const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
+  const [registerSaving, setRegisterSaving] = useState(false);
+  const [registerError, setRegisterError] = useState("");
+  const [registerSuccess, setRegisterSuccess] = useState("");
+  const [registerForm, setRegisterForm] = useState(createRegistrationForm);
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [activityLogs, setActivityLogs] = useState([]);
   const [isEditingAgent, setIsEditingAgent] = useState(false);
@@ -208,37 +308,194 @@ function App() {
   const [approvalsError, setApprovalsError] = useState("");
   const [approvalFilter, setApprovalFilter] = useState("all");
   const [reviewingApprovalId, setReviewingApprovalId] = useState(null);
+  const [policyViolations, setPolicyViolations] = useState([]);
+  const [violationsLoading, setViolationsLoading] = useState(false);
+  const [violationsError, setViolationsError] = useState("");
+  const [violationFilter, setViolationFilter] = useState("all");
+  const [updatingViolationId, setUpdatingViolationId] = useState(null);
+  const [selectedViolation, setSelectedViolation] = useState(null);
+  const registeredAgentsRef = useRef(null);
 
-  useEffect(() => {
-    async function loadAgents() {
-      try {
-        const response = await fetch("http://localhost:5000/api/agents");
+  const loadAgents = async ({ showLoading = false } = {}) => {
+    if (showLoading) {
+      setLoading(true);
+    }
 
-        if (!response.ok) {
-          throw new Error("Could not load agents");
-        }
+    try {
+      const response = await fetch("http://localhost:5000/api/agents");
 
-        const data = await response.json();
-        setAgents(data);
-      } catch (err) {
-        setError(err.message);
-      } finally {
+      if (!response.ok) {
+        throw new Error("Could not load agents");
+      }
+
+      const data = await response.json();
+      setAgents(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      if (showLoading) {
         setLoading(false);
       }
     }
+  };
 
-    async function loadActivityLogs() {
-      try {
-        const logs = await fetchActivityLogs();
-        setActivityLogs(logs);
-      } catch (err) {
-        console.error(err);
-      }
+  const loadActivityLogs = async () => {
+    try {
+      const logs = await fetchActivityLogs();
+      setActivityLogs(logs);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const loadOverviewPolicyViolations = async () => {
+    try {
+      const violations = await fetchPolicyViolations("all");
+      setPolicyViolations(violations);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const loadOverviewApprovals = async () => {
+    try {
+      const requests = await fetchApprovalRequests("all");
+      setApprovalRequests(requests);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const openRegisterModal = () => {
+    setRegisterForm(createRegistrationForm());
+    setRegisterError("");
+    setRegisterSuccess("");
+    setIsRegisterModalOpen(true);
+  };
+
+  const closeRegisterModal = () => {
+    if (registerSaving) {
+      return;
     }
 
-    loadAgents();
+    setIsRegisterModalOpen(false);
+    setRegisterError("");
+  };
+
+  const handleRegisterFormChange = (field, value) => {
+    setRegisterForm((current) => ({
+      ...current,
+      [field]: value
+    }));
+  };
+
+  const submitRegisterAgent = async () => {
+    const requiredFields = [
+      ["agent_id", "Agent ID is required."],
+      ["name", "Agent Name is required."],
+      ["agent_type", "Agent Type is required."]
+    ];
+    const missingField = requiredFields.find(
+      ([field]) => registerForm[field].trim().length === 0
+    );
+
+    if (missingField) {
+      setRegisterError(missingField[1]);
+      return;
+    }
+
+    const riskScore = Number(registerForm.risk_score);
+
+    if (
+      !Number.isInteger(riskScore) ||
+      riskScore < 0 ||
+      riskScore > 100
+    ) {
+      setRegisterError("Risk Score must be an integer from 0 to 100.");
+      return;
+    }
+
+    setRegisterSaving(true);
+    setRegisterError("");
+
+    try {
+      const endpointUrl = registerForm.endpoint_url.trim();
+      const response = await fetch("http://localhost:5000/api/agents", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          agent_id: registerForm.agent_id,
+          name: registerForm.name,
+          description: registerForm.description,
+          agent_type: registerForm.agent_type,
+          owner_name: registerForm.owner_name,
+          owner_team: registerForm.owner_team,
+          status: "active",
+          integration_status: registerForm.integration_status,
+          risk_score: riskScore,
+          endpoint_url: endpointUrl === "" ? null : endpointUrl
+        })
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+
+        throw new Error(
+          errorBody.details ||
+          errorBody.error ||
+          "Failed to register agent"
+        );
+      }
+
+      await loadAgents();
+      await loadActivityLogs();
+
+      setRegisterForm(createRegistrationForm());
+      setIsRegisterModalOpen(false);
+      setRegisterSuccess("Agent registered successfully");
+    } catch (error) {
+      console.error(error);
+      setRegisterError(error.message || "Could not register agent.");
+    } finally {
+      setRegisterSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAgents({ showLoading: true });
     loadActivityLogs();
+    loadOverviewApprovals();
+    loadOverviewPolicyViolations();
   }, []);
+
+  useEffect(() => {
+    if (activeView !== "overview") {
+      return;
+    }
+
+    loadOverviewApprovals();
+    loadOverviewPolicyViolations();
+  }, [activeView]);
+
+  useEffect(() => {
+    if (!isRegisterModalOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        closeRegisterModal();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isRegisterModalOpen, registerSaving]);
 
   useEffect(() => {
     if (activeView !== "approvals") {
@@ -263,18 +520,62 @@ function App() {
     loadApprovals();
   }, [activeView, approvalFilter]);
 
+  useEffect(() => {
+    if (activeView !== "policy-alerts") {
+      return;
+    }
+
+    async function loadPolicyViolations() {
+      setViolationsLoading(true);
+      setViolationsError("");
+
+      try {
+        const violations = await fetchPolicyViolations(violationFilter);
+        setPolicyViolations(violations);
+      } catch (err) {
+        console.error(err);
+        setViolationsError("Could not load policy violations.");
+      } finally {
+        setViolationsLoading(false);
+      }
+    }
+
+    loadPolicyViolations();
+  }, [activeView, violationFilter]);
+
   const metrics = useMemo(() => {
+    const totalAgents = agents.length;
+    const connectedAgents = agents.filter(
+      (agent) => agent.integration_status === "connected"
+    ).length;
+    const healthyAgents = agents.filter(
+      (agent) => agent.health_status === "healthy"
+    ).length;
+    const delayedAgents = agents.filter(
+      (agent) => agent.health_status === "delayed"
+    ).length;
+    const offlineAgents = agents.filter(
+      (agent) => agent.health_status === "offline"
+    ).length;
+    const unknownAgents = agents.filter(
+      (agent) => !agent.health_status || agent.health_status === "unknown"
+    ).length;
+    const highRiskAgents = agents.filter(
+      (agent) => agent.risk_score >= 70
+    ).length;
+    const disabledAgents = agents.filter(
+      (agent) => agent.status === "disabled"
+    ).length;
+
     return {
-      total: agents.length,
-      connected: agents.filter(
-        (agent) => agent.integration_status === "connected"
-      ).length,
-      highRisk: agents.filter(
-        (agent) => agent.risk_score >= 70
-      ).length,
-      disabled: agents.filter(
-        (agent) => agent.status === "disabled"
-      ).length
+      totalAgents,
+      connectedAgents,
+      healthyAgents,
+      delayedAgents,
+      offlineAgents,
+      unknownAgents,
+      highRiskAgents,
+      disabledAgents
     };
   }, [agents]);
 
@@ -289,6 +590,74 @@ function App() {
         .length
     };
   }, [approvalRequests]);
+
+  const violationSummary = useMemo(() => {
+    return {
+      total: policyViolations.length,
+      open: policyViolations.filter((violation) => violation.status === "open")
+        .length,
+      investigating: policyViolations.filter(
+        (violation) => violation.status === "investigating"
+      ).length,
+      resolved: policyViolations.filter(
+        (violation) => violation.status === "resolved"
+      ).length,
+      critical: policyViolations.filter(
+        (violation) => violation.severity === "critical"
+      ).length
+    };
+  }, [policyViolations]);
+
+  const overviewViolationMetrics = useMemo(() => {
+    const openViolations = policyViolations.filter(
+      (violation) => violation.status === "open"
+    ).length;
+    const investigatingViolations = policyViolations.filter(
+      (violation) => violation.status === "investigating"
+    ).length;
+    const criticalActiveViolations = policyViolations.filter(
+      (violation) =>
+        violation.severity === "critical" && violation.status !== "resolved"
+    ).length;
+
+    return {
+      openViolations,
+      investigatingViolations,
+      criticalActiveViolations,
+      activeViolations: openViolations + investigatingViolations
+    };
+  }, [policyViolations]);
+
+  const overviewGovernanceMetrics = useMemo(() => {
+    return {
+      pendingApprovals: approvalRequests.filter(
+        (request) => request.status === "pending"
+      ).length,
+      highestRisk: Math.max(...agents.map((agent) => agent.risk_score), 0),
+      policyCoverageLabel: "Configured coverage",
+      policyCoverageValue: "80%"
+    };
+  }, [agents, approvalRequests]);
+
+  const openPolicyAlertsFromOverview = () => {
+    setViolationFilter(
+      overviewViolationMetrics.openViolations > 0 ? "open" : "all"
+    );
+    setActiveView("policy-alerts");
+  };
+
+  const openApprovalsFromOverview = () => {
+    setApprovalFilter("pending");
+    setActiveView("approvals");
+  };
+
+  const focusRegisteredAgentsTable = () => {
+    registeredAgentsRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start"
+    });
+    registeredAgentsRef.current?.focus({ preventScroll: true });
+  };
 
   const updateAgentStatus = async (
     agentId,
@@ -584,6 +953,56 @@ function App() {
     }
   };
 
+  const refreshPolicyViolations = async () => {
+    const violations = await fetchPolicyViolations(violationFilter);
+    setPolicyViolations(violations);
+  };
+
+  const updatePolicyViolationStatus = async (violationId, status) => {
+    setUpdatingViolationId(violationId);
+    setViolationsError("");
+
+    try {
+      const response = await fetch(
+        `http://localhost:5000/api/policy-violations/${violationId}/status`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            status,
+            resolved_by: "Navid",
+            resolution_note:
+              status === "resolved"
+                ? "Resolved in AgentOps Control Center"
+                : "Under investigation in AgentOps Control Center"
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+
+        throw new Error(
+          errorBody.details ||
+          errorBody.error ||
+          "Failed to update policy violation"
+        );
+      }
+
+      await refreshPolicyViolations();
+      await loadActivityLogs();
+    } catch (error) {
+      console.error(error);
+      setViolationsError(
+        error.message || "Could not update policy violation."
+      );
+    } finally {
+      setUpdatingViolationId(null);
+    }
+  };
+
   return (
     <>
     <div className="dashboard">
@@ -609,6 +1028,14 @@ function App() {
           <button className="nav-item">Agents</button>
           <button className="nav-item">Activity</button>
           <button className="nav-item">Policies</button>
+          <button
+            className={`nav-item ${
+              activeView === "policy-alerts" ? "active" : ""
+            }`}
+            onClick={() => setActiveView("policy-alerts")}
+          >
+            Policy Alerts
+          </button>
           <button
             className={`nav-item ${activeView === "approvals" ? "active" : ""}`}
             onClick={() => setActiveView("approvals")}
@@ -659,25 +1086,91 @@ function App() {
         <section className="kpi-grid">
           <article className="kpi-card">
             <span className="kpi-label">Registered agents</span>
-            <strong className="kpi-value">{metrics.total}</strong>
+            <strong className="kpi-value">{metrics.totalAgents}</strong>
             <span className="kpi-note">Across the organisation</span>
           </article>
 
           <article className="kpi-card">
             <span className="kpi-label">Live integrations</span>
-            <strong className="kpi-value">{metrics.connected}</strong>
+            <strong className="kpi-value">{metrics.connectedAgents}</strong>
             <span className="kpi-note positive">Connected runtime</span>
           </article>
 
+          <button
+            className="kpi-card kpi-card-button healthy-agents-kpi"
+            type="button"
+            onClick={focusRegisteredAgentsTable}
+          >
+            <span className="kpi-label">Healthy Agents</span>
+            <strong className="kpi-value">{metrics.healthyAgents}</strong>
+            <span className="kpi-note positive">Operational</span>
+          </button>
+
           <article className="kpi-card">
             <span className="kpi-label">High-risk agents</span>
-            <strong className="kpi-value">{metrics.highRisk}</strong>
+            <strong className="kpi-value">{metrics.highRiskAgents}</strong>
             <span className="kpi-note warning">Requires monitoring</span>
           </article>
 
+          <button
+            className={`kpi-card kpi-card-button pending-approvals-kpi ${
+              overviewGovernanceMetrics.pendingApprovals > 0
+                ? "warning"
+                : "clear"
+            }`}
+            type="button"
+            onClick={openApprovalsFromOverview}
+          >
+            <span className="kpi-label">Pending Approvals</span>
+            <strong className="kpi-value">
+              {overviewGovernanceMetrics.pendingApprovals}
+            </strong>
+            <span
+              className={`kpi-note ${
+                overviewGovernanceMetrics.pendingApprovals > 0
+                  ? "warning"
+                  : "positive"
+              }`}
+            >
+              {overviewGovernanceMetrics.pendingApprovals > 0
+                ? "Awaiting review"
+                : "No pending approvals"}
+            </span>
+          </button>
+
+          <button
+            className={`kpi-card kpi-card-button policy-violations-kpi ${
+              overviewViolationMetrics.criticalActiveViolations > 0
+                ? "danger"
+                : overviewViolationMetrics.activeViolations > 0
+                ? "warning"
+                : "clear"
+            }`}
+            type="button"
+            onClick={openPolicyAlertsFromOverview}
+          >
+            <span className="kpi-label">Policy Violations</span>
+            <strong className="kpi-value">
+              {overviewViolationMetrics.activeViolations}
+            </strong>
+            <span
+              className={`kpi-note ${
+                overviewViolationMetrics.criticalActiveViolations > 0
+                  ? "danger"
+                  : overviewViolationMetrics.activeViolations > 0
+                  ? "warning"
+                  : "positive"
+              }`}
+            >
+              {overviewViolationMetrics.activeViolations > 0
+                ? "Requires attention"
+                : "No active violations"}
+            </span>
+          </button>
+
           <article className="kpi-card">
             <span className="kpi-label">Disabled agents</span>
-            <strong className="kpi-value">{metrics.disabled}</strong>
+            <strong className="kpi-value">{metrics.disabledAgents}</strong>
             <span className="kpi-note danger">Execution blocked</span>
           </article>
         </section>
@@ -702,7 +1195,7 @@ function App() {
               <div className="connector-line"></div>
 
               <div className="agent-node-grid">
-                {agents.slice(0, 4).map((agent) => (
+                {agents.map((agent) => (
                   <div className="agent-node" key={agent.id}>
                     <span
                          className={`node-dot ${
@@ -743,47 +1236,134 @@ function App() {
             <div className="risk-score">
               <span>Highest risk</span>
               <strong>
-                {Math.max(...agents.map((agent) => agent.risk_score), 0)}
+                {overviewGovernanceMetrics.highestRisk}
               </strong>
               <small>out of 100</small>
             </div>
 
             <div className="risk-breakdown">
               <div>
+                <span>Highest risk</span>
+                <strong>{overviewGovernanceMetrics.highestRisk}</strong>
+              </div>
+
+              <div>
                 <span>Critical controls</span>
                 <strong>Enabled</strong>
               </div>
 
               <div>
-                <span>Policy coverage</span>
-                <strong>80%</strong>
+                <span>{overviewGovernanceMetrics.policyCoverageLabel}</span>
+                <strong>{overviewGovernanceMetrics.policyCoverageValue}</strong>
               </div>
 
               <div>
                 <span>Pending approvals</span>
-                <strong>1</strong>
+                <strong>{overviewGovernanceMetrics.pendingApprovals}</strong>
+              </div>
+
+              <div>
+                <span>Open violations</span>
+                <strong>{overviewViolationMetrics.openViolations}</strong>
+              </div>
+
+              <div>
+                <span>Investigating</span>
+                <strong>
+                  {overviewViolationMetrics.investigatingViolations}
+                </strong>
+              </div>
+
+              <div>
+                <span>Critical active</span>
+                <strong>
+                  {overviewViolationMetrics.criticalActiveViolations}
+                </strong>
+              </div>
+
+              <div>
+                <span>Healthy agents</span>
+                <strong>{metrics.healthyAgents}</strong>
+              </div>
+            </div>
+
+            <div className="operational-health-summary">
+              <div className="operational-health-header">
+                <span>Operational Health</span>
+              </div>
+
+              <div className="health-summary-grid">
+                <div>
+                  <span className="health-dot healthy"></span>
+                  <small>Healthy</small>
+                  <strong>{metrics.healthyAgents}</strong>
+                </div>
+
+                <div>
+                  <span className="health-dot delayed"></span>
+                  <small>Delayed</small>
+                  <strong>{metrics.delayedAgents}</strong>
+                </div>
+
+                <div>
+                  <span className="health-dot offline"></span>
+                  <small>Offline</small>
+                  <strong>{metrics.offlineAgents}</strong>
+                </div>
+
+                <div>
+                  <span className="health-dot unknown"></span>
+                  <small>Unknown</small>
+                  <strong>{metrics.unknownAgents}</strong>
+                </div>
               </div>
             </div>
           </article>
         </section>
 
-        <section className="panel inventory-panel">
+        <section
+          className="panel inventory-panel"
+          ref={registeredAgentsRef}
+          tabIndex="-1"
+        >
           <div className="panel-header">
             <div>
               <p className="panel-kicker">Inventory</p>
               <h2>Registered Agents</h2>
             </div>
 
-            <button className="primary-button">Register Agent</button>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={openRegisterModal}
+            >
+              Register Agent
+            </button>
           </div>
 
+          {registerSuccess && (
+            <div className="registration-success-message">
+              {registerSuccess}
+            </div>
+          )}
+
           <div className="table-wrapper">
-            <table>
+            <table className="inventory-table">
+              <colgroup>
+                <col className="agent-column" />
+                <col className="department-column" />
+                <col className="runtime-column" />
+                <col className="health-column" />
+                <col className="risk-column" />
+                <col className="status-column" />
+                <col className="actions-column" />
+              </colgroup>
               <thead>
                 <tr>
                   <th>Agent</th>
                   <th>Department</th>
                   <th>Runtime</th>
+                  <th>Health</th>
                   <th>Risk</th>
                   <th>Status</th>
                   <th className="actions-heading">Actions</th>
@@ -806,13 +1386,31 @@ function App() {
                       </div>
                     </td>
 
-                    <td>{agent.owner_team}</td>
+                    <td className="truncate-cell" title={agent.owner_team}>
+                      {agent.owner_team}
+                    </td>
 
                     <td>
                       <span
                         className={`runtime-badge ${agent.integration_status}`}
                       >
                         {agent.integration_status}
+                      </span>
+                    </td>
+
+                    <td>
+                      <span
+                        className={`health-badge ${
+                          agent.health_status ?? "unknown"
+                        }`}
+                      >
+                        <span
+                          className={`health-dot ${
+                            agent.health_status ?? "unknown"
+                          }`}
+                          aria-hidden="true"
+                        ></span>
+                        {formatHealthLabel(agent.health_status)}
                       </span>
                     </td>
 
@@ -962,6 +1560,184 @@ function App() {
           )}
         </section>
         </>
+        ) : activeView === "policy-alerts" ? (
+        <section className="policy-alerts-page">
+          <header className="topbar policy-alerts-topbar">
+            <div>
+              <p className="eyebrow">Governance Monitor</p>
+              <h1>Policy Alerts</h1>
+              <p className="subtitle">
+                Governance violations detected across registered agents
+              </p>
+            </div>
+          </header>
+
+          <section className="violation-summary-grid">
+            <article className="violation-summary-card">
+              <span>Total Violations</span>
+              <strong>{violationSummary.total}</strong>
+            </article>
+
+            <article className="violation-summary-card open">
+              <span>Open</span>
+              <strong>{violationSummary.open}</strong>
+            </article>
+
+            <article className="violation-summary-card investigating">
+              <span>Investigating</span>
+              <strong>{violationSummary.investigating}</strong>
+            </article>
+
+            <article className="violation-summary-card resolved">
+              <span>Resolved</span>
+              <strong>{violationSummary.resolved}</strong>
+            </article>
+
+            <article className="violation-summary-card critical">
+              <span>Critical</span>
+              <strong>{violationSummary.critical}</strong>
+            </article>
+          </section>
+
+          <section className="panel policy-alerts-panel">
+            <div className="panel-header policy-alerts-panel-header">
+              <div>
+                <p className="panel-kicker">Violation Queue</p>
+                <h2>Alerts</h2>
+              </div>
+
+              <div className="violation-filter-group">
+                {["all", "open", "investigating", "resolved"].map((filter) => (
+                  <button
+                    type="button"
+                    className={violationFilter === filter ? "active" : ""}
+                    key={filter}
+                    onClick={() => setViolationFilter(filter)}
+                  >
+                    {filter.charAt(0).toUpperCase() + filter.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {violationsError && (
+              <div className="violations-message error">
+                {violationsError}
+              </div>
+            )}
+
+            {violationsLoading ? (
+              <div className="violations-message">
+                Loading policy alerts...
+              </div>
+            ) : policyViolations.length === 0 ? (
+              <div className="violations-message">
+                No policy violations found.
+              </div>
+            ) : (
+              <div className="violations-table-wrapper">
+                <table className="violations-table">
+                  <thead>
+                    <tr>
+                      <th>Severity</th>
+                      <th>Agent</th>
+                      <th>Violation Type</th>
+                      <th>Attempted Action</th>
+                      <th>Status</th>
+                      <th>Detected</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {policyViolations.map((violation) => (
+                      <tr key={violation.id}>
+                        <td>
+                          <span
+                            className={`violation-severity ${violation.severity}`}
+                          >
+                            {violation.severity}
+                          </span>
+                        </td>
+
+                        <td>
+                          <div className="violation-agent">
+                            <strong>{violation.agent_name}</strong>
+                            <span>{violation.agent_external_id}</span>
+                          </div>
+                        </td>
+
+                        <td>{formatViolationType(violation.violation_type)}</td>
+                        <td>
+                          <span className="violation-action-name">
+                            {violation.attempted_action}
+                          </span>
+                        </td>
+
+                        <td>
+                          <span className={`violation-status ${violation.status}`}>
+                            {violation.status}
+                          </span>
+                        </td>
+
+                        <td>{formatActivityTime(violation.detected_at)}</td>
+
+                        <td>
+                          <div className="violation-row-actions">
+                            {violation.status === "open" && (
+                              <button
+                                type="button"
+                                className="investigate-button"
+                                disabled={updatingViolationId === violation.id}
+                                onClick={() =>
+                                  updatePolicyViolationStatus(
+                                    violation.id,
+                                    "investigating"
+                                  )
+                                }
+                              >
+                                {updatingViolationId === violation.id
+                                  ? "Updating..."
+                                  : "Investigate"}
+                              </button>
+                            )}
+
+                            {violation.status === "investigating" && (
+                              <button
+                                type="button"
+                                className="resolve-button"
+                                disabled={updatingViolationId === violation.id}
+                                onClick={() =>
+                                  updatePolicyViolationStatus(
+                                    violation.id,
+                                    "resolved"
+                                  )
+                                }
+                              >
+                                {updatingViolationId === violation.id
+                                  ? "Updating..."
+                                  : "Resolve"}
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              className="details-button"
+                              disabled={updatingViolationId === violation.id}
+                              onClick={() => setSelectedViolation(violation)}
+                            >
+                              View Details
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </section>
         ) : (
         <section className="approvals-page">
           <header className="topbar approvals-topbar">
@@ -1123,6 +1899,312 @@ function App() {
         )}
       </main>
     </div>
+
+    {selectedViolation && (
+      <>
+        <div
+          className="drawer-overlay"
+          onClick={() => setSelectedViolation(null)}
+        ></div>
+
+        <aside
+          className="agent-drawer violation-drawer"
+          aria-label="Policy violation details"
+        >
+          <div className="agent-drawer-accent"></div>
+
+          <div className="agent-drawer-header">
+            <div>
+              <p className="drawer-kicker">Policy Alert</p>
+              <h2>{formatViolationType(selectedViolation.violation_type)}</h2>
+              <span>{selectedViolation.attempted_action}</span>
+            </div>
+
+            <button
+              className="drawer-close-button"
+              type="button"
+              aria-label="Close policy violation details"
+              onClick={() => setSelectedViolation(null)}
+            >
+              <X size={20} strokeWidth={2.2} />
+            </button>
+          </div>
+
+          <div className="agent-drawer-content">
+            <section className="drawer-section">
+              <div className="drawer-section-title">
+                <ShieldAlert size={17} strokeWidth={2.2} />
+                <h3>Violation Details</h3>
+              </div>
+
+              <div className="drawer-field">
+                <span>Agent name</span>
+                <strong>{selectedViolation.agent_name}</strong>
+              </div>
+
+              <div className="drawer-field">
+                <span>Agent external ID</span>
+                <strong>{selectedViolation.agent_external_id}</strong>
+              </div>
+
+              <div className="drawer-field">
+                <span>Violation type</span>
+                <strong>
+                  {formatViolationType(selectedViolation.violation_type)}
+                </strong>
+              </div>
+
+              <div className="drawer-field">
+                <span>Attempted action</span>
+                <strong>{selectedViolation.attempted_action}</strong>
+              </div>
+
+              <div className="drawer-field">
+                <span>Severity</span>
+                <strong>
+                  <span
+                    className={`violation-severity ${selectedViolation.severity}`}
+                  >
+                    {selectedViolation.severity}
+                  </span>
+                </strong>
+              </div>
+
+              <div className="drawer-field">
+                <span>Status</span>
+                <strong>
+                  <span
+                    className={`violation-status ${selectedViolation.status}`}
+                  >
+                    {selectedViolation.status}
+                  </span>
+                </strong>
+              </div>
+
+              <div className="drawer-field violation-detail-text">
+                <span>Reason / details</span>
+                <strong>
+                  {formatViolationDetails(selectedViolation.details)}
+                </strong>
+              </div>
+            </section>
+
+            <section className="drawer-section">
+              <div className="drawer-section-title">
+                <Activity size={17} strokeWidth={2.2} />
+                <h3>Resolution</h3>
+              </div>
+
+              <div className="drawer-field">
+                <span>Detected at</span>
+                <strong>{formatActivityTime(selectedViolation.detected_at)}</strong>
+              </div>
+
+              <div className="drawer-field">
+                <span>Resolved at</span>
+                <strong>
+                  {selectedViolation.resolved_at
+                    ? formatActivityTime(selectedViolation.resolved_at)
+                    : "Not resolved"}
+                </strong>
+              </div>
+
+              <div className="drawer-field">
+                <span>Resolved by</span>
+                <strong>{displayValue(selectedViolation.resolved_by)}</strong>
+              </div>
+
+              <div className="drawer-field violation-detail-text">
+                <span>Resolution note</span>
+                <strong>
+                  {displayValue(selectedViolation.resolution_note)}
+                </strong>
+              </div>
+            </section>
+          </div>
+        </aside>
+      </>
+    )}
+
+    {isRegisterModalOpen && (
+      <div
+        className="registration-modal-overlay"
+        onClick={closeRegisterModal}
+      >
+        <div
+          className="registration-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="registration-modal-title"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="registration-modal-header">
+            <div>
+              <p className="drawer-kicker">Agent Inventory</p>
+              <h2 id="registration-modal-title">Register New Agent</h2>
+            </div>
+
+            <button
+              className="drawer-close-button"
+              type="button"
+              aria-label="Close registration modal"
+              disabled={registerSaving}
+              onClick={closeRegisterModal}
+            >
+              <X size={20} strokeWidth={2.2} />
+            </button>
+          </div>
+
+          <form
+            className="registration-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              submitRegisterAgent();
+            }}
+          >
+            {registerError && (
+              <div className="registration-message error">
+                {registerError}
+              </div>
+            )}
+
+            <div className="registration-form-grid">
+              <label>
+                <span>Agent ID</span>
+                <input
+                  type="text"
+                  value={registerForm.agent_id}
+                  onChange={(event) =>
+                    handleRegisterFormChange("agent_id", event.target.value)
+                  }
+                />
+              </label>
+
+              <label>
+                <span>Agent Name</span>
+                <input
+                  type="text"
+                  value={registerForm.name}
+                  onChange={(event) =>
+                    handleRegisterFormChange("name", event.target.value)
+                  }
+                />
+              </label>
+            </div>
+
+            <label>
+              <span>Description</span>
+              <textarea
+                rows="3"
+                value={registerForm.description}
+                onChange={(event) =>
+                  handleRegisterFormChange("description", event.target.value)
+                }
+              />
+            </label>
+
+            <div className="registration-form-grid">
+              <label>
+                <span>Agent Type</span>
+                <input
+                  type="text"
+                  value={registerForm.agent_type}
+                  onChange={(event) =>
+                    handleRegisterFormChange("agent_type", event.target.value)
+                  }
+                />
+              </label>
+
+              <label>
+                <span>Owner Name</span>
+                <input
+                  type="text"
+                  value={registerForm.owner_name}
+                  onChange={(event) =>
+                    handleRegisterFormChange("owner_name", event.target.value)
+                  }
+                />
+              </label>
+            </div>
+
+            <div className="registration-form-grid">
+              <label>
+                <span>Owner Team</span>
+                <input
+                  type="text"
+                  value={registerForm.owner_team}
+                  onChange={(event) =>
+                    handleRegisterFormChange("owner_team", event.target.value)
+                  }
+                />
+              </label>
+
+              <label>
+                <span>Integration Status</span>
+                <select
+                  value={registerForm.integration_status}
+                  onChange={(event) =>
+                    handleRegisterFormChange(
+                      "integration_status",
+                      event.target.value
+                    )
+                  }
+                >
+                  <option value="connected">connected</option>
+                  <option value="demo">demo</option>
+                  <option value="disconnected">disconnected</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="registration-form-grid">
+              <label>
+                <span>Risk Score</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={registerForm.risk_score}
+                  onChange={(event) =>
+                    handleRegisterFormChange("risk_score", event.target.value)
+                  }
+                />
+              </label>
+
+              <label>
+                <span>Endpoint URL</span>
+                <input
+                  type="text"
+                  value={registerForm.endpoint_url}
+                  onChange={(event) =>
+                    handleRegisterFormChange("endpoint_url", event.target.value)
+                  }
+                />
+              </label>
+            </div>
+
+            <div className="registration-modal-actions">
+              <button
+                type="button"
+                className="registration-cancel-button"
+                disabled={registerSaving}
+                onClick={closeRegisterModal}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="submit"
+                className="registration-submit-button"
+                disabled={registerSaving}
+              >
+                {registerSaving ? "Registering..." : "Register Agent"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    )}
 
     {selectedAgent && (
       <>
@@ -1365,6 +2447,44 @@ function App() {
               <div className="drawer-field">
                 <span>Updated date</span>
                 <strong>{formatDate(selectedAgent.updated_at)}</strong>
+              </div>
+            </section>
+
+            <section className="drawer-section">
+              <div className="drawer-section-title">
+                <Activity size={17} strokeWidth={2.2} />
+                <h3>Agent Health</h3>
+              </div>
+
+              <div className="drawer-field">
+                <span>Health Status</span>
+                <strong>
+                  <span
+                    className={`drawer-badge health-${
+                      selectedAgent.health_status ?? "unknown"
+                    }`}
+                  >
+                    <span
+                      className={`health-dot ${
+                        selectedAgent.health_status ?? "unknown"
+                      }`}
+                      aria-hidden="true"
+                    ></span>
+                    {formatHealthLabel(selectedAgent.health_status)}
+                  </span>
+                </strong>
+              </div>
+
+              <div className="drawer-field">
+                <span>Last Seen</span>
+                <strong>{formatLastSeen(selectedAgent.last_seen)}</strong>
+              </div>
+
+              <div className="drawer-field">
+                <span>Response Time</span>
+                <strong>
+                  {formatResponseTime(selectedAgent.response_time_ms)}
+                </strong>
               </div>
             </section>
 

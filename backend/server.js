@@ -14,9 +14,13 @@ app.use(express.json());
 const PORT = 5000;
 const VALID_AGENT_STATUSES = ["active", "disabled", "offline"];
 const VALID_INTEGRATION_STATUSES = ["connected", "demo", "disconnected"];
+const VALID_HEALTH_STATUSES = ["healthy", "delayed", "offline", "unknown"];
 const VALID_ENFORCEMENT_STATUSES = ["draft", "enforced", "disabled"];
 const VALID_APPROVAL_STATUSES = ["pending", "approved", "rejected"];
 const VALID_APPROVAL_DECISIONS = ["approved", "rejected"];
+const VALID_VIOLATION_SEVERITIES = ["low", "medium", "high", "critical"];
+const VALID_VIOLATION_STATUSES = ["open", "investigating", "resolved"];
+const VALID_VIOLATION_UPDATE_STATUSES = ["investigating", "resolved"];
 
 function isStringArray(value) {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
@@ -121,6 +125,45 @@ function validateAgentPayload(agent) {
   return null;
 }
 
+function validateAgentRegistrationPayload(agent) {
+  if (
+    typeof agent.agent_id !== "string" ||
+    agent.agent_id.trim().length === 0
+  ) {
+    return "agent_id must be a non-empty string";
+  }
+
+  const validationError = validateAgentPayload(agent);
+
+  if (validationError) {
+    return validationError;
+  }
+
+  if (!VALID_AGENT_STATUSES.includes(agent.status)) {
+    return "status must be active, disabled, or offline";
+  }
+
+  return null;
+}
+
+function validateAgentHeartbeatPayload(payload) {
+  if (!VALID_HEALTH_STATUSES.includes(payload.health_status)) {
+    return "health_status must be healthy, delayed, offline, or unknown";
+  }
+
+  if (
+    payload.response_time_ms !== null &&
+    (
+      !Number.isInteger(payload.response_time_ms) ||
+      payload.response_time_ms < 0
+    )
+  ) {
+    return "response_time_ms must be an integer greater than or equal to 0, or null";
+  }
+
+  return null;
+}
+
 function validateApprovalRequestPayload(payload) {
   if (!Number.isInteger(payload.agent_id)) {
     return "agent_id must be an integer";
@@ -173,6 +216,59 @@ function validateApprovalDecisionPayload(payload) {
   return null;
 }
 
+function validatePolicyViolationPayload(payload) {
+  if (!Number.isInteger(payload.agent_id)) {
+    return "agent_id must be an integer";
+  }
+
+  if (
+    typeof payload.violation_type !== "string" ||
+    payload.violation_type.trim().length === 0
+  ) {
+    return "violation_type must be a non-empty string";
+  }
+
+  if (
+    typeof payload.attempted_action !== "string" ||
+    payload.attempted_action.trim().length === 0
+  ) {
+    return "attempted_action must be a non-empty string";
+  }
+
+  if (!VALID_VIOLATION_SEVERITIES.includes(payload.severity)) {
+    return "severity must be low, medium, high, or critical";
+  }
+
+  if (!isPlainObject(payload.details)) {
+    return "details must be an object";
+  }
+
+  return null;
+}
+
+function validatePolicyViolationStatusPayload(payload) {
+  if (!VALID_VIOLATION_UPDATE_STATUSES.includes(payload.status)) {
+    return "status must be investigating or resolved";
+  }
+
+  if (
+    typeof payload.resolved_by !== "string" ||
+    payload.resolved_by.trim().length === 0
+  ) {
+    return "resolved_by must be a non-empty string";
+  }
+
+  if (
+    payload.resolution_note !== undefined &&
+    payload.resolution_note !== null &&
+    typeof payload.resolution_note !== "string"
+  ) {
+    return "resolution_note must be a string";
+  }
+
+  return null;
+}
+
 app.get("/", (req, res) => {
   res.json({
     application: "AgentOps Control Tower",
@@ -212,6 +308,9 @@ app.get("/api/agents", async (req, res) => {
         owner_team,
         status,
         integration_status,
+        health_status,
+        last_seen,
+        response_time_ms,
         risk_score,
         endpoint_url,
         created_at,
@@ -228,6 +327,184 @@ app.get("/api/agents", async (req, res) => {
       message: "Could not retrieve agents",
       error: error.message
     });
+  }
+});
+
+app.post("/api/agents", async (req, res) => {
+  const validationError = validateAgentRegistrationPayload(req.body);
+
+  if (validationError) {
+    return res.status(400).json({
+      error: validationError
+    });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    const {
+      agent_id,
+      name,
+      description,
+      agent_type,
+      owner_name,
+      owner_team,
+      status,
+      integration_status,
+      risk_score,
+      endpoint_url
+    } = req.body;
+
+    const trimmedAgentId = agent_id.trim();
+    const trimmedName = name.trim();
+    const trimmedAgentType = agent_type.trim();
+    const trimmedDescription = description.trim();
+    const trimmedOwnerName = owner_name.trim();
+    const trimmedOwnerTeam = owner_team.trim();
+    const trimmedEndpointUrl =
+      endpoint_url === null
+        ? null
+        : endpoint_url.trim();
+
+    await client.query("BEGIN");
+
+    const existingAgent = await client.query(
+      `
+      SELECT id
+      FROM agents
+      WHERE agent_id = $1
+      `,
+      [trimmedAgentId]
+    );
+
+    if (existingAgent.rows.length > 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(409).json({
+        error: "Agent ID already exists"
+      });
+    }
+
+    const createdAgent = await client.query(
+      `
+      INSERT INTO agents (
+        agent_id,
+        name,
+        description,
+        agent_type,
+        owner_name,
+        owner_team,
+        status,
+        integration_status,
+        risk_score,
+        endpoint_url
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING
+        id,
+        agent_id,
+        name,
+        description,
+        agent_type,
+        owner_name,
+        owner_team,
+        status,
+        integration_status,
+        health_status,
+        last_seen,
+        response_time_ms,
+        risk_score,
+        endpoint_url,
+        created_at,
+        updated_at
+      `,
+      [
+        trimmedAgentId,
+        trimmedName,
+        trimmedDescription,
+        trimmedAgentType,
+        trimmedOwnerName,
+        trimmedOwnerTeam,
+        status,
+        integration_status,
+        risk_score,
+        trimmedEndpointUrl
+      ]
+    );
+
+    const newAgent = createdAgent.rows[0];
+
+    await client.query(
+      `
+      INSERT INTO policies (
+        agent_id,
+        policy_name,
+        allowed_actions,
+        blocked_actions,
+        requires_approval,
+        max_actions_per_hour,
+        risk_threshold,
+        enforcement_status
+      )
+      VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7, $8)
+      `,
+      [
+        newAgent.id,
+        "Default Agent Policy",
+        JSON.stringify([]),
+        JSON.stringify(["external_write", "privileged_action"]),
+        true,
+        20,
+        60,
+        "draft"
+      ]
+    );
+
+    await client.query(
+      `
+      INSERT INTO activity_logs (
+        agent_id,
+        action,
+        previous_status,
+        new_status,
+        performed_by,
+        details
+      )
+      VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+      `,
+      [
+        newAgent.id,
+        "AGENT_REGISTERED",
+        null,
+        newAgent.status,
+        "Navid",
+        JSON.stringify({
+          agent_name: newAgent.name,
+          agent_external_id: newAgent.agent_id,
+          source: "AgentOps Control Center"
+        })
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    res.status(201).json(newAgent);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Agent registration failed:", error);
+
+    if (error.code === "23505") {
+      return res.status(409).json({
+        error: "Agent ID already exists"
+      });
+    }
+
+    res.status(500).json({
+      error: "Failed to register agent",
+      details: error.message
+    });
+  } finally {
+    client.release();
   }
 });
 
@@ -297,6 +574,9 @@ app.put("/api/agents/:id", async (req, res) => {
         owner_team,
         status,
         integration_status,
+        health_status,
+        last_seen,
+        response_time_ms,
         risk_score,
         endpoint_url,
         created_at,
@@ -442,6 +722,115 @@ app.put("/api/agents/:id/status", async (req, res) => {
 
     res.status(500).json({
       error: "Failed to update agent"
+    });
+  } finally {
+    client.release();
+  }
+});
+
+app.put("/api/agents/:id/heartbeat", async (req, res) => {
+  const validationError = validateAgentHeartbeatPayload(req.body);
+
+  if (validationError) {
+    return res.status(400).json({
+      error: validationError
+    });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    const { id } = req.params;
+    const { health_status, response_time_ms } = req.body;
+
+    await client.query("BEGIN");
+
+    const currentAgent = await client.query(
+      `
+      SELECT id, name
+      FROM agents
+      WHERE id = $1
+      `,
+      [id]
+    );
+
+    if (currentAgent.rows.length === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        error: "Agent not found"
+      });
+    }
+
+    const updatedAgent = await client.query(
+      `
+      UPDATE agents
+      SET health_status = $1,
+          response_time_ms = $2,
+          last_seen = NOW(),
+          updated_at = NOW()
+      WHERE id = $3
+      RETURNING
+        id,
+        agent_id,
+        name,
+        description,
+        agent_type,
+        owner_name,
+        owner_team,
+        status,
+        integration_status,
+        health_status,
+        last_seen,
+        response_time_ms,
+        risk_score,
+        endpoint_url,
+        created_at,
+        updated_at
+      `,
+      [
+        health_status,
+        response_time_ms,
+        id
+      ]
+    );
+
+    await client.query(
+      `
+      INSERT INTO activity_logs (
+        agent_id,
+        action,
+        previous_status,
+        new_status,
+        performed_by,
+        details
+      )
+      VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+      `,
+      [
+        id,
+        "AGENT_HEARTBEAT_UPDATED",
+        null,
+        health_status,
+        "Agent Runtime",
+        JSON.stringify({
+          agent_name: currentAgent.rows[0].name,
+          response_time_ms,
+          source: "Agent Runtime"
+        })
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    res.json(updatedAgent.rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Agent heartbeat update failed:", error);
+
+    res.status(500).json({
+      error: "Failed to update agent heartbeat",
+      details: error.message
     });
   } finally {
     client.release();
@@ -625,6 +1014,358 @@ app.put("/api/agents/:id/policy", async (req, res) => {
 
     res.status(500).json({
       error: "Failed to update policy",
+      details: error.message
+    });
+  } finally {
+    client.release();
+  }
+});
+
+app.post("/api/policy-violations", async (req, res) => {
+  const validationError = validatePolicyViolationPayload(req.body);
+
+  if (validationError) {
+    return res.status(400).json({
+      error: validationError
+    });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    const {
+      agent_id,
+      violation_type,
+      attempted_action,
+      severity,
+      details
+    } = req.body;
+    const trimmedViolationType = violation_type.trim();
+    const trimmedAttemptedAction = attempted_action.trim();
+
+    await client.query("BEGIN");
+
+    const agent = await client.query(
+      `
+      SELECT id, name
+      FROM agents
+      WHERE id = $1
+      `,
+      [agent_id]
+    );
+
+    if (agent.rows.length === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        error: "Agent not found"
+      });
+    }
+
+    const policy = await client.query(
+      `
+      SELECT blocked_actions
+      FROM policies
+      WHERE agent_id = $1
+      `,
+      [agent_id]
+    );
+
+    if (policy.rows.length === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        error: "Policy not found"
+      });
+    }
+
+    if (trimmedViolationType === "BLOCKED_ACTION_ATTEMPT") {
+      const blockedActions = Array.isArray(policy.rows[0].blocked_actions)
+        ? policy.rows[0].blocked_actions
+        : [];
+
+      if (!blockedActions.includes(trimmedAttemptedAction)) {
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({
+          error: "attempted_action is not blocked by this agent policy"
+        });
+      }
+    }
+
+    const violation = await client.query(
+      `
+      INSERT INTO policy_violations (
+        agent_id,
+        violation_type,
+        attempted_action,
+        severity,
+        details,
+        status
+      )
+      VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+      RETURNING
+        id,
+        agent_id,
+        violation_type,
+        attempted_action,
+        severity,
+        details,
+        status,
+        detected_at,
+        resolved_at,
+        resolved_by,
+        resolution_note
+      `,
+      [
+        agent_id,
+        trimmedViolationType,
+        trimmedAttemptedAction,
+        severity,
+        JSON.stringify(details),
+        "open"
+      ]
+    );
+
+    await client.query(
+      `
+      INSERT INTO activity_logs (
+        agent_id,
+        action,
+        previous_status,
+        new_status,
+        performed_by,
+        details
+      )
+      VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+      `,
+      [
+        agent_id,
+        "POLICY_VIOLATION_DETECTED",
+        null,
+        "open",
+        "Agent Runtime",
+        JSON.stringify({
+          agent_name: agent.rows[0].name,
+          violation_type: trimmedViolationType,
+          attempted_action: trimmedAttemptedAction,
+          severity,
+          source: "Agent Runtime"
+        })
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    res.status(201).json(violation.rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Failed to create policy violation:", error.message);
+
+    res.status(500).json({
+      error: "Failed to create policy violation"
+    });
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/policy-violations", async (req, res) => {
+  try {
+    const { status, severity, agent_id } = req.query;
+    const filters = [];
+    const params = [];
+
+    if (status) {
+      if (!VALID_VIOLATION_STATUSES.includes(status)) {
+        return res.status(400).json({
+          error: "Invalid policy violation status filter"
+        });
+      }
+
+      params.push(status);
+      filters.push(`policy_violations.status = $${params.length}`);
+    }
+
+    if (severity) {
+      if (!VALID_VIOLATION_SEVERITIES.includes(severity)) {
+        return res.status(400).json({
+          error: "Invalid policy violation severity filter"
+        });
+      }
+
+      params.push(severity);
+      filters.push(`policy_violations.severity = $${params.length}`);
+    }
+
+    if (agent_id) {
+      const parsedAgentId = Number(agent_id);
+
+      if (!Number.isInteger(parsedAgentId)) {
+        return res.status(400).json({
+          error: "agent_id filter must be an integer"
+        });
+      }
+
+      params.push(parsedAgentId);
+      filters.push(`policy_violations.agent_id = $${params.length}`);
+    }
+
+    const whereClause = filters.length > 0
+      ? `WHERE ${filters.join(" AND ")}`
+      : "";
+
+    const result = await pool.query(
+      `
+      SELECT
+        policy_violations.id,
+        policy_violations.agent_id,
+        policy_violations.violation_type,
+        policy_violations.attempted_action,
+        policy_violations.severity,
+        policy_violations.details,
+        policy_violations.status,
+        policy_violations.detected_at,
+        policy_violations.resolved_at,
+        policy_violations.resolved_by,
+        policy_violations.resolution_note,
+        agents.name AS agent_name,
+        agents.agent_id AS agent_external_id
+      FROM policy_violations
+      JOIN agents
+        ON agents.id = policy_violations.agent_id
+      ${whereClause}
+      ORDER BY policy_violations.detected_at DESC
+      LIMIT 50
+      `,
+      params
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Failed to retrieve policy violations:", error.message);
+
+    res.status(500).json({
+      error: "Could not retrieve policy violations"
+    });
+  }
+});
+
+app.put("/api/policy-violations/:id/status", async (req, res) => {
+  const validationError = validatePolicyViolationStatusPayload(req.body);
+
+  if (validationError) {
+    return res.status(400).json({
+      error: validationError
+    });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    const { id } = req.params;
+    const { status, resolved_by, resolution_note = "" } = req.body;
+
+    await client.query("BEGIN");
+
+    const violation = await client.query(
+      `
+      SELECT
+        policy_violations.id,
+        policy_violations.agent_id,
+        policy_violations.status,
+        policy_violations.violation_type,
+        policy_violations.attempted_action,
+        policy_violations.severity,
+        agents.name AS agent_name
+      FROM policy_violations
+      JOIN agents
+        ON agents.id = policy_violations.agent_id
+      WHERE policy_violations.id = $1::integer
+      `,
+      [id]
+    );
+
+    if (violation.rows.length === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        error: "Policy violation not found"
+      });
+    }
+
+    const updatedViolation = await client.query(
+      `
+      UPDATE policy_violations
+      SET status = $1::varchar,
+          resolved_by = $2::varchar,
+          resolution_note = $3::text,
+          resolved_at = CASE
+            WHEN $1::varchar = 'resolved' THEN NOW()
+            ELSE NULL
+          END
+      WHERE id = $4::integer
+      RETURNING
+        id,
+        agent_id,
+        violation_type,
+        attempted_action,
+        severity,
+        details,
+        status,
+        detected_at,
+        resolved_at,
+        resolved_by,
+        resolution_note
+      `,
+      [
+        status,
+        resolved_by.trim(),
+        resolution_note ?? "",
+        id
+      ]
+    );
+
+    await client.query(
+      `
+      INSERT INTO activity_logs (
+        agent_id,
+        action,
+        previous_status,
+        new_status,
+        performed_by,
+        details
+      )
+      VALUES ($1::integer, $2::varchar, $3::varchar, $4::varchar, $5::varchar, $6::jsonb)
+      `,
+      [
+        violation.rows[0].agent_id,
+        status === "resolved"
+          ? "POLICY_VIOLATION_RESOLVED"
+          : "POLICY_VIOLATION_INVESTIGATING",
+        violation.rows[0].status,
+        status,
+        resolved_by.trim(),
+        JSON.stringify({
+          agent_name: violation.rows[0].agent_name,
+          violation_type: violation.rows[0].violation_type,
+          attempted_action: violation.rows[0].attempted_action,
+          severity: violation.rows[0].severity,
+          resolution_note: resolution_note ?? "",
+          source: "AgentOps Control Center"
+        })
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    res.json(updatedViolation.rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Failed to update policy violation status:", error.message);
+
+    res.status(500).json({
+      error: "Failed to update policy violation status",
       details: error.message
     });
   } finally {
@@ -950,6 +1691,37 @@ app.put("/api/approval-requests/:id/decision", async (req, res) => {
 
 async function initializeDatabase() {
   await pool.query(`
+    ALTER TABLE agents
+    ADD COLUMN IF NOT EXISTS health_status VARCHAR(30) NOT NULL DEFAULT 'unknown'
+  `);
+
+  await pool.query(`
+    ALTER TABLE agents
+    ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP
+  `);
+
+  await pool.query(`
+    ALTER TABLE agents
+    ADD COLUMN IF NOT EXISTS response_time_ms INTEGER
+  `);
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'valid_agent_health_status'
+      ) THEN
+        ALTER TABLE agents
+        ADD CONSTRAINT valid_agent_health_status
+          CHECK (health_status IN ('healthy', 'delayed', 'offline', 'unknown'));
+      END IF;
+    END
+    $$;
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS activity_logs (
       id SERIAL PRIMARY KEY,
       agent_id INTEGER NOT NULL,
@@ -1058,6 +1830,30 @@ async function initializeDatabase() {
         ON DELETE CASCADE,
       CONSTRAINT valid_approval_status
         CHECK (status IN ('pending', 'approved', 'rejected'))
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS policy_violations (
+      id SERIAL PRIMARY KEY,
+      agent_id INTEGER NOT NULL,
+      violation_type VARCHAR(100) NOT NULL,
+      attempted_action VARCHAR(150) NOT NULL,
+      severity VARCHAR(30) NOT NULL DEFAULT 'medium',
+      details JSONB NOT NULL DEFAULT '{}',
+      status VARCHAR(30) NOT NULL DEFAULT 'open',
+      detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      resolved_at TIMESTAMP,
+      resolved_by VARCHAR(100),
+      resolution_note TEXT,
+      CONSTRAINT fk_violation_agent
+        FOREIGN KEY (agent_id)
+        REFERENCES agents(id)
+        ON DELETE CASCADE,
+      CONSTRAINT valid_violation_severity
+        CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+      CONSTRAINT valid_violation_status
+        CHECK (status IN ('open', 'investigating', 'resolved'))
     )
   `);
 }

@@ -102,6 +102,10 @@ function formatViolationDetails(details) {
 }
 
 function formatActionLabel(action) {
+  if (action === "AGENT_REGISTERED") {
+    return "Agent registered";
+  }
+
   if (action === "AGENT_DISABLED") {
     return "Agent disabled";
   }
@@ -122,6 +126,22 @@ function formatActionLabel(action) {
     return "Policy violation detected";
   }
 
+  if (action === "POLICY_UPDATED") {
+    return "Policy updated";
+  }
+
+  if (action === "APPROVAL_REQUESTED") {
+    return "Approval requested";
+  }
+
+  if (action === "APPROVAL_APPROVED") {
+    return "Approval approved";
+  }
+
+  if (action === "APPROVAL_REJECTED") {
+    return "Approval rejected";
+  }
+
   if (action === "POLICY_VIOLATION_INVESTIGATING") {
     return "Violation investigating";
   }
@@ -131,6 +151,42 @@ function formatActionLabel(action) {
   }
 
   return "Status changed";
+}
+
+function formatLogDetail(log) {
+  const details = log.details ?? {};
+
+  if (log.action === "AGENT_HEARTBEAT_UPDATED") {
+    return `Response time: ${formatResponseTime(details.response_time_ms)}`;
+  }
+
+  if (log.action === "APPROVAL_REQUESTED") {
+    return `Request type: ${formatRequestType(details.request_type ?? "unknown")}`;
+  }
+
+  if (log.action === "POLICY_VIOLATION_DETECTED") {
+    return `${details.attempted_action ?? "Unknown action"} / ${
+      details.severity ?? "unknown"
+    }`;
+  }
+
+  if (details.policy_name) {
+    return `Policy: ${details.policy_name}`;
+  }
+
+  if (details.review_note) {
+    return details.review_note;
+  }
+
+  if (details.violation_type) {
+    return formatViolationType(details.violation_type);
+  }
+
+  if (details.agent_external_id) {
+    return details.agent_external_id;
+  }
+
+  return "Recorded by AgentOps";
 }
 
 function getRiskTier(score) {
@@ -314,6 +370,11 @@ function App() {
   const [violationFilter, setViolationFilter] = useState("all");
   const [updatingViolationId, setUpdatingViolationId] = useState(null);
   const [selectedViolation, setSelectedViolation] = useState(null);
+  const [policies, setPolicies] = useState([]);
+  const [policiesLoading, setPoliciesLoading] = useState(false);
+  const [policiesError, setPoliciesError] = useState("");
+  const [activityFilter, setActivityFilter] = useState("all");
+  const [auditFilter, setAuditFilter] = useState("all");
   const registeredAgentsRef = useRef(null);
 
   const loadAgents = async ({ showLoading = false } = {}) => {
@@ -543,6 +604,39 @@ function App() {
     loadPolicyViolations();
   }, [activeView, violationFilter]);
 
+  useEffect(() => {
+    if (activeView !== "policies") {
+      return;
+    }
+
+    async function loadPolicies() {
+      setPoliciesLoading(true);
+      setPoliciesError("");
+
+      try {
+        const policyRecords = await Promise.all(
+          agents.map(async (agent) => {
+            const policy = await fetchAgentPolicy(agent.id);
+
+            return {
+              agent,
+              policy
+            };
+          })
+        );
+
+        setPolicies(policyRecords);
+      } catch (err) {
+        console.error(err);
+        setPoliciesError("Could not load policies.");
+      } finally {
+        setPoliciesLoading(false);
+      }
+    }
+
+    loadPolicies();
+  }, [activeView, agents]);
+
   const metrics = useMemo(() => {
     const totalAgents = agents.length;
     const connectedAgents = agents.filter(
@@ -639,6 +733,91 @@ function App() {
     };
   }, [agents, approvalRequests]);
 
+  const agentPageSummary = useMemo(() => {
+    return {
+      total: metrics.totalAgents,
+      active: agents.filter((agent) => agent.status === "active").length,
+      disabled: metrics.disabledAgents,
+      healthy: metrics.healthyAgents,
+      highRisk: metrics.highRiskAgents
+    };
+  }, [agents, metrics]);
+
+  const policySummary = useMemo(() => {
+    return {
+      total: policies.length,
+      enforced: policies.filter(
+        (record) => record.policy.enforcement_status === "enforced"
+      ).length,
+      draft: policies.filter(
+        (record) => record.policy.enforcement_status === "draft"
+      ).length,
+      disabled: policies.filter(
+        (record) => record.policy.enforcement_status === "disabled"
+      ).length,
+      approvalRequired: policies.filter(
+        (record) => record.policy.requires_approval
+      ).length
+    };
+  }, [policies]);
+
+  const runtimeActivityActions = [
+    "AGENT_HEARTBEAT_UPDATED",
+    "APPROVAL_REQUESTED",
+    "POLICY_VIOLATION_DETECTED"
+  ];
+  const auditActionGroups = {
+    agents: [
+      "AGENT_REGISTERED",
+      "AGENT_UPDATED",
+      "AGENT_ENABLED",
+      "AGENT_DISABLED"
+    ],
+    policies: ["POLICY_UPDATED"],
+    approvals: ["APPROVAL_APPROVED", "APPROVAL_REJECTED"],
+    violations: [
+      "POLICY_VIOLATION_INVESTIGATING",
+      "POLICY_VIOLATION_RESOLVED"
+    ]
+  };
+  const auditActions = Object.values(auditActionGroups).flat();
+
+  const filteredRuntimeActivity = useMemo(() => {
+    return activityLogs.filter((log) => {
+      if (!runtimeActivityActions.includes(log.action)) {
+        return false;
+      }
+
+      if (activityFilter === "heartbeats") {
+        return log.action === "AGENT_HEARTBEAT_UPDATED";
+      }
+
+      if (activityFilter === "approval-requests") {
+        return log.action === "APPROVAL_REQUESTED";
+      }
+
+      if (activityFilter === "violations") {
+        return log.action === "POLICY_VIOLATION_DETECTED";
+      }
+
+      return true;
+    });
+  }, [activityLogs, activityFilter]);
+
+  const filteredAuditLogs = useMemo(() => {
+    return activityLogs.filter((log) => {
+      if (!auditActions.includes(log.action)) {
+        return false;
+      }
+
+      if (auditFilter === "all") {
+        return true;
+      }
+
+      return auditActionGroups[auditFilter]?.includes(log.action);
+    });
+  }, [activityLogs, auditFilter]);
+
   const openPolicyAlertsFromOverview = () => {
     setViolationFilter(
       overviewViolationMetrics.openViolations > 0 ? "open" : "all"
@@ -721,6 +900,13 @@ function App() {
       const policy = await fetchAgentPolicy(agent.id);
       setSelectedPolicy(policy);
       setPolicyForm(createPolicyForm(policy));
+
+      if (options.editPolicy) {
+        setAgentEditError("");
+        setPolicyError("");
+        setIsEditingAgent(false);
+        setIsEditingPolicy(true);
+      }
     } catch (error) {
       console.error(error);
       setPolicyError("Could not load policy details.");
@@ -1003,6 +1189,159 @@ function App() {
     }
   };
 
+  const renderAgentsTable = () => (
+    <div className="table-wrapper">
+      <table className="inventory-table">
+        <colgroup>
+          <col className="agent-column" />
+          <col className="department-column" />
+          <col className="runtime-column" />
+          <col className="health-column" />
+          <col className="risk-column" />
+          <col className="status-column" />
+          <col className="actions-column" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Agent</th>
+            <th>Department</th>
+            <th>Runtime</th>
+            <th>Health</th>
+            <th>Risk</th>
+            <th>Status</th>
+            <th className="actions-heading">Actions</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {agents.map((agent) => (
+            <tr key={agent.id}>
+              <td>
+                <div className="agent-cell">
+                  <div className="agent-icon">
+                    {agent.name.charAt(0)}
+                  </div>
+
+                  <div>
+                    <strong>{agent.name}</strong>
+                    <span>{agent.agent_id}</span>
+                  </div>
+                </div>
+              </td>
+
+              <td className="truncate-cell" title={agent.owner_team}>
+                {agent.owner_team}
+              </td>
+
+              <td>
+                <span className={`runtime-badge ${agent.integration_status}`}>
+                  {agent.integration_status}
+                </span>
+              </td>
+
+              <td>
+                <span className={`health-badge ${agent.health_status ?? "unknown"}`}>
+                  <span
+                    className={`health-dot ${agent.health_status ?? "unknown"}`}
+                    aria-hidden="true"
+                  ></span>
+                  {formatHealthLabel(agent.health_status)}
+                </span>
+              </td>
+
+              <td>
+                <div className="risk-cell">
+                  <span>{agent.risk_score}</span>
+
+                  <div className="risk-bar">
+                    <div
+                      className="risk-bar-fill"
+                      style={{ width: `${agent.risk_score}%` }}
+                    ></div>
+                  </div>
+                </div>
+              </td>
+
+              <td>
+                <span className={`agent-status ${agent.status}`}>
+                  {agent.status}
+                </span>
+              </td>
+
+              <td className="actions-cell">
+                <div className="actions-menu-wrapper">
+                  <button
+                    className="agent-actions-button"
+                    type="button"
+                    aria-label={`Open actions for ${agent.name}`}
+                    aria-expanded={openMenuId === agent.id}
+                    onClick={() =>
+                      setOpenMenuId(openMenuId === agent.id ? null : agent.id)
+                    }
+                  >
+                    <MoreVertical size={19} strokeWidth={2} />
+                  </button>
+
+                  {openMenuId === agent.id && (
+                    <div className="agent-actions-menu">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          openAgentDetails(agent);
+                        }}
+                      >
+                        View details
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          openAgentDetails(agent, { edit: true });
+                        }}
+                      >
+                        Edit agent
+                      </button>
+
+                      {agent.status === "disabled" ? (
+                        <button
+                          type="button"
+                          className="enable-action"
+                          onClick={() => {
+                            updateAgentStatus(agent.id, "active");
+                            setOpenMenuId(null);
+                          }}
+                        >
+                          Enable agent
+                        </button>
+                      ) : (
+                        <>
+                          <button type="button" className="pause-action">
+                            Pause agent
+                          </button>
+
+                          <button
+                            type="button"
+                            className="disable-action"
+                            onClick={() => {
+                              updateAgentStatus(agent.id, "disabled");
+                              setOpenMenuId(null);
+                            }}
+                          >
+                            Disable agent
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
   return (
     <>
     <div className="dashboard">
@@ -1025,9 +1364,24 @@ function App() {
           >
             Overview
           </button>
-          <button className="nav-item">Agents</button>
-          <button className="nav-item">Activity</button>
-          <button className="nav-item">Policies</button>
+          <button
+            className={`nav-item ${activeView === "agents" ? "active" : ""}`}
+            onClick={() => setActiveView("agents")}
+          >
+            Agents
+          </button>
+          <button
+            className={`nav-item ${activeView === "activity" ? "active" : ""}`}
+            onClick={() => setActiveView("activity")}
+          >
+            Activity
+          </button>
+          <button
+            className={`nav-item ${activeView === "policies" ? "active" : ""}`}
+            onClick={() => setActiveView("policies")}
+          >
+            Policies
+          </button>
           <button
             className={`nav-item ${
               activeView === "policy-alerts" ? "active" : ""
@@ -1042,7 +1396,12 @@ function App() {
           >
             Approvals
           </button>
-          <button className="nav-item">Audit Logs</button>
+          <button
+            className={`nav-item ${activeView === "audit-logs" ? "active" : ""}`}
+            onClick={() => setActiveView("audit-logs")}
+          >
+            Audit Logs
+          </button>
         </nav>
 
         <div className="sidebar-footer">
@@ -1347,163 +1706,7 @@ function App() {
             </div>
           )}
 
-          <div className="table-wrapper">
-            <table className="inventory-table">
-              <colgroup>
-                <col className="agent-column" />
-                <col className="department-column" />
-                <col className="runtime-column" />
-                <col className="health-column" />
-                <col className="risk-column" />
-                <col className="status-column" />
-                <col className="actions-column" />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th>Agent</th>
-                  <th>Department</th>
-                  <th>Runtime</th>
-                  <th>Health</th>
-                  <th>Risk</th>
-                  <th>Status</th>
-                  <th className="actions-heading">Actions</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {agents.map((agent) => (
-                  <tr key={agent.id}>
-                    <td>
-                      <div className="agent-cell">
-                        <div className="agent-icon">
-                          {agent.name.charAt(0)}
-                        </div>
-
-                        <div>
-                          <strong>{agent.name}</strong>
-                          <span>{agent.agent_id}</span>
-                        </div>
-                      </div>
-                    </td>
-
-                    <td className="truncate-cell" title={agent.owner_team}>
-                      {agent.owner_team}
-                    </td>
-
-                    <td>
-                      <span
-                        className={`runtime-badge ${agent.integration_status}`}
-                      >
-                        {agent.integration_status}
-                      </span>
-                    </td>
-
-                    <td>
-                      <span
-                        className={`health-badge ${
-                          agent.health_status ?? "unknown"
-                        }`}
-                      >
-                        <span
-                          className={`health-dot ${
-                            agent.health_status ?? "unknown"
-                          }`}
-                          aria-hidden="true"
-                        ></span>
-                        {formatHealthLabel(agent.health_status)}
-                      </span>
-                    </td>
-
-                    <td>
-                      <div className="risk-cell">
-                        <span>{agent.risk_score}</span>
-
-                        <div className="risk-bar">
-                          <div
-                            className="risk-bar-fill"
-                            style={{ width: `${agent.risk_score}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    </td>
-
-                    <td>
-                      <span className={`agent-status ${agent.status}`}>
-                        {agent.status}
-                      </span>
-                    </td>
-
-                    <td className="actions-cell">
-                     <div className="actions-menu-wrapper">
-                        <button
-                          className="agent-actions-button"
-                          type="button"
-                          aria-label={`Open actions for ${agent.name}`}
-                          aria-expanded={openMenuId === agent.id}
-                          onClick={() =>
-                          setOpenMenuId(openMenuId === agent.id ? null : agent.id)
-                          }
-                        >
-                        <MoreVertical size={19} strokeWidth={2} />
-                       </button>
-
-                       {openMenuId === agent.id && (
-                          <div className="agent-actions-menu">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                openAgentDetails(agent);
-                              }}
-                            >
-                              View details
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                openAgentDetails(agent, { edit: true });
-                              }}
-                            >
-                              Edit agent
-                            </button>
-
-                             {agent.status === "disabled" ? (
-                            <button
-                              type="button"
-                              className="enable-action"
-                              onClick={() => {
-                                updateAgentStatus(agent.id, "active");
-                                setOpenMenuId(null);
-                              }}
-                            >
-                                 Enable agent
-                           </button>
-                             ) : (
-                           <>
-                            <button type="button" className="pause-action">
-                            Pause agent
-                            </button>
-
-                            <button
-                              type="button"
-                              className="disable-action"
-                              onClick={() => {
-                                updateAgentStatus(agent.id, "disabled");
-                                setOpenMenuId(null);
-                              }}
-                            >
-                                 Disable agent
-                             </button>
-                           </>
-                            )}
-                          </div>
-                            )}
-                          </div>
-                     </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {renderAgentsTable()}
         </section>
 
         <section className="panel activity-panel">
@@ -1560,6 +1763,361 @@ function App() {
           )}
         </section>
         </>
+        ) : activeView === "agents" ? (
+        <section className="agents-page">
+          <header className="topbar page-topbar">
+            <div>
+              <p className="eyebrow">Agent Inventory</p>
+              <h1>Agent Inventory</h1>
+              <p className="subtitle">
+                Registered AI agents and operational status
+              </p>
+            </div>
+
+            <button
+              className="primary-button"
+              type="button"
+              onClick={openRegisterModal}
+            >
+              Register Agent
+            </button>
+          </header>
+
+          <section className="summary-card-grid five-up">
+            <article className="summary-card">
+              <span>Total agents</span>
+              <strong>{agentPageSummary.total}</strong>
+            </article>
+
+            <article className="summary-card approved">
+              <span>Active agents</span>
+              <strong>{agentPageSummary.active}</strong>
+            </article>
+
+            <article className="summary-card rejected">
+              <span>Disabled agents</span>
+              <strong>{agentPageSummary.disabled}</strong>
+            </article>
+
+            <article className="summary-card approved">
+              <span>Healthy agents</span>
+              <strong>{agentPageSummary.healthy}</strong>
+            </article>
+
+            <article className="summary-card pending">
+              <span>High-risk agents</span>
+              <strong>{agentPageSummary.highRisk}</strong>
+            </article>
+          </section>
+
+          <section className="panel inventory-panel">
+            <div className="panel-header">
+              <div>
+                <p className="panel-kicker">Inventory</p>
+                <h2>Registered Agents</h2>
+              </div>
+            </div>
+
+            {registerSuccess && (
+              <div className="registration-success-message">
+                {registerSuccess}
+              </div>
+            )}
+
+            {renderAgentsTable()}
+          </section>
+        </section>
+        ) : activeView === "policies" ? (
+        <section className="policies-page">
+          <header className="topbar page-topbar">
+            <div>
+              <p className="eyebrow">Governance</p>
+              <h1>Policies</h1>
+              <p className="subtitle">
+                Policy controls attached to registered agents
+              </p>
+            </div>
+          </header>
+
+          <section className="summary-card-grid five-up">
+            <article className="summary-card">
+              <span>Total policies</span>
+              <strong>{policySummary.total}</strong>
+            </article>
+
+            <article className="summary-card approved">
+              <span>Enforced</span>
+              <strong>{policySummary.enforced}</strong>
+            </article>
+
+            <article className="summary-card pending">
+              <span>Draft</span>
+              <strong>{policySummary.draft}</strong>
+            </article>
+
+            <article className="summary-card rejected">
+              <span>Disabled</span>
+              <strong>{policySummary.disabled}</strong>
+            </article>
+
+            <article className="summary-card pending">
+              <span>Approval required</span>
+              <strong>{policySummary.approvalRequired}</strong>
+            </article>
+          </section>
+
+          <section className="panel policies-panel">
+            <div className="panel-header">
+              <div>
+                <p className="panel-kicker">Policy Register</p>
+                <h2>Agent Policies</h2>
+              </div>
+            </div>
+
+            {policiesError && (
+              <div className="page-table-message error">{policiesError}</div>
+            )}
+
+            {policiesLoading ? (
+              <div className="page-table-message">Loading policies...</div>
+            ) : policies.length === 0 ? (
+              <div className="page-table-message">No policies found.</div>
+            ) : (
+              <div className="standard-table-wrapper">
+                <table className="policies-table">
+                  <thead>
+                    <tr>
+                      <th>Agent</th>
+                      <th>Policy name</th>
+                      <th>Enforcement</th>
+                      <th>Approval required</th>
+                      <th>Max actions/hour</th>
+                      <th>Risk threshold</th>
+                      <th>Allowed actions</th>
+                      <th>Blocked actions</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {policies.map(({ agent, policy }) => (
+                      <tr key={policy.id}>
+                        <td>
+                          <div className="activity-agent">
+                            <strong>{agent.name}</strong>
+                            <span>{agent.agent_id}</span>
+                          </div>
+                        </td>
+                        <td>{policy.policy_name}</td>
+                        <td>
+                          <span
+                            className={`drawer-badge enforcement-${policy.enforcement_status}`}
+                          >
+                            {policy.enforcement_status}
+                          </span>
+                        </td>
+                        <td>{policy.requires_approval ? "Yes" : "No"}</td>
+                        <td>{policy.max_actions_per_hour}</td>
+                        <td>{policy.risk_threshold}</td>
+                        <td>{policy.allowed_actions?.length ?? 0}</td>
+                        <td>{policy.blocked_actions?.length ?? 0}</td>
+                        <td>
+                          <div className="page-row-actions">
+                            <button
+                              type="button"
+                              onClick={() => openAgentDetails(agent)}
+                            >
+                              View Agent
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openAgentDetails(agent, { editPolicy: true })
+                              }
+                            >
+                              Edit Policy
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </section>
+        ) : activeView === "activity" ? (
+        <section className="activity-page">
+          <header className="topbar page-topbar">
+            <div>
+              <p className="eyebrow">Runtime Events</p>
+              <h1>Runtime Activity</h1>
+              <p className="subtitle">
+                Events generated by connected agents and runtime services
+              </p>
+            </div>
+          </header>
+
+          <section className="panel activity-page-panel">
+            <div className="panel-header page-panel-header">
+              <div>
+                <p className="panel-kicker">Runtime Stream</p>
+                <h2>Events</h2>
+              </div>
+
+              <div className="page-filter-group">
+                {[
+                  ["all", "All"],
+                  ["heartbeats", "Heartbeats"],
+                  ["approval-requests", "Approval Requests"],
+                  ["violations", "Violations"]
+                ].map(([filter, label]) => (
+                  <button
+                    type="button"
+                    className={activityFilter === filter ? "active" : ""}
+                    key={filter}
+                    onClick={() => setActivityFilter(filter)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {filteredRuntimeActivity.length === 0 ? (
+              <div className="page-table-message">
+                No runtime activity found.
+              </div>
+            ) : (
+              <div className="standard-table-wrapper">
+                <table className="runtime-activity-table">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Agent</th>
+                      <th>Event</th>
+                      <th>State</th>
+                      <th>Source</th>
+                      <th>Details</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {filteredRuntimeActivity.map((log) => (
+                      <tr key={log.id}>
+                        <td>{formatActivityTime(log.created_at)}</td>
+                        <td>
+                          <div className="activity-agent">
+                            <strong>{log.agent_name}</strong>
+                            <span>{log.agent_external_id}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <span className={`activity-action ${log.action}`}>
+                            {formatActionLabel(log.action)}
+                          </span>
+                        </td>
+                        <td>
+                          <span className="status-change">
+                            {displayValue(log.new_status, "Recorded")}
+                          </span>
+                        </td>
+                        <td>{log.performed_by}</td>
+                        <td>{formatLogDetail(log)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </section>
+        ) : activeView === "audit-logs" ? (
+        <section className="audit-logs-page">
+          <header className="topbar page-topbar">
+            <div>
+              <p className="eyebrow">Control Plane</p>
+              <h1>Audit Logs</h1>
+              <p className="subtitle">
+                Human and governance changes recorded by the control plane
+              </p>
+            </div>
+          </header>
+
+          <section className="panel audit-logs-panel">
+            <div className="panel-header page-panel-header">
+              <div>
+                <p className="panel-kicker">Governance Trail</p>
+                <h2>Administrative Actions</h2>
+              </div>
+
+              <div className="page-filter-group">
+                {[
+                  ["all", "All"],
+                  ["agents", "Agents"],
+                  ["policies", "Policies"],
+                  ["approvals", "Approvals"],
+                  ["violations", "Violations"]
+                ].map(([filter, label]) => (
+                  <button
+                    type="button"
+                    className={auditFilter === filter ? "active" : ""}
+                    key={filter}
+                    onClick={() => setAuditFilter(filter)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {filteredAuditLogs.length === 0 ? (
+              <div className="page-table-message">
+                No audit records found.
+              </div>
+            ) : (
+              <div className="standard-table-wrapper">
+                <table className="audit-logs-table">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Performed By</th>
+                      <th>Agent</th>
+                      <th>Action</th>
+                      <th>Previous State</th>
+                      <th>New State</th>
+                      <th>Details</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {filteredAuditLogs.map((log) => (
+                      <tr key={log.id}>
+                        <td>{formatActivityTime(log.created_at)}</td>
+                        <td>{log.performed_by}</td>
+                        <td>
+                          <div className="activity-agent">
+                            <strong>{log.agent_name}</strong>
+                            <span>{log.agent_external_id}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <span className={`activity-action ${log.action}`}>
+                            {formatActionLabel(log.action)}
+                          </span>
+                        </td>
+                        <td>{displayValue(log.previous_status, "None")}</td>
+                        <td>{displayValue(log.new_status, "Recorded")}</td>
+                        <td>{formatLogDetail(log)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </section>
         ) : activeView === "policy-alerts" ? (
         <section className="policy-alerts-page">
           <header className="topbar policy-alerts-topbar">

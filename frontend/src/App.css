@@ -1625,6 +1625,171 @@ tbody tr:hover {
 }
 
 /* -------------------------------------------------
+   ACTIVATED SIDEBAR PAGES
+------------------------------------------------- */
+
+.agents-page,
+.policies-page,
+.activity-page,
+.audit-logs-page {
+  min-width: 0;
+}
+
+.page-topbar {
+  margin-bottom: 22px;
+}
+
+.summary-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.summary-card {
+  min-height: 112px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--accent);
+  background:
+    linear-gradient(
+      145deg,
+      rgba(255, 255, 255, 0.026),
+      transparent 50%
+    ),
+    var(--bg-panel);
+}
+
+.summary-card span {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+}
+
+.summary-card strong {
+  display: block;
+  margin-top: 14px;
+  color: var(--text-primary);
+  font-size: 36px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.summary-card.pending {
+  border-top-color: var(--warning);
+}
+
+.summary-card.approved {
+  border-top-color: var(--success);
+}
+
+.summary-card.rejected {
+  border-top-color: var(--danger);
+}
+
+.page-panel-header {
+  align-items: center;
+}
+
+.page-filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.page-filter-group button {
+  min-height: 34px;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel-elevated);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.page-filter-group button:hover,
+.page-filter-group button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+.standard-table-wrapper {
+  overflow-x: auto;
+}
+
+.policies-table,
+.runtime-activity-table,
+.audit-logs-table {
+  min-width: 1120px;
+}
+
+.policies-table th,
+.policies-table td,
+.runtime-activity-table th,
+.runtime-activity-table td,
+.audit-logs-table th,
+.audit-logs-table td {
+  padding: 14px 16px;
+}
+
+.page-table-message {
+  min-height: 88px;
+  padding: 28px 20px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.page-table-message.error {
+  color: var(--danger);
+}
+
+.page-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 190px;
+}
+
+.page-row-actions button {
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel-elevated);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.page-row-actions button:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+/* -------------------------------------------------
    POLICY ALERTS
 ------------------------------------------------- */
 

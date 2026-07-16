@@ -293,6 +293,43 @@ Key concepts include:
 
 ---
 
+# AgentOps Control Tower
+
+...
+
+## 🔄 Agent Governance Workflow
+
+```mermaid
+flowchart TD
+
+A[AI Agent] --> B[AgentOps Control Tower]
+
+B --> C{Policy Evaluation}
+
+C -->|Allowed| D[Execute Action]
+C -->|Approval Required| E[Approval Queue]
+C -->|Blocked| F[Policy Violation]
+
+E --> G[Human Approval]
+
+G -->|Approve| D
+G -->|Reject| H[Action Rejected]
+
+D --> I[Activity Log]
+
+F --> J[Policy Alert]
+
+J --> K[Audit Trail]
+
+H --> K
+
+I --> K
+
+A --> L[Heartbeat]
+
+L --> M[Health Monitoring]
+```
+
 ## 👨‍💻 Author
 
 ### Navid Ghobadpour

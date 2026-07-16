@@ -1,5 +1,7 @@
 # 🛰️ AgentOps Control Tower
 
+![License](https://img.shields.io/badge/License-MIT-yellow)
+
 ### Enterprise Governance and Operations Platform for AI Agents
 
 AgentOps Control Tower provides centralized visibility, governance, policy enforcement, approval workflows, health monitoring, and audit logging for organizational AI agents.
@@ -388,6 +390,10 @@ GitHub:
 https://github.com/golden-horizon
 
 ---
+
+## 📄 License
+
+This project is licensed under the MIT License.
 
 ## ⭐ Support
 

@@ -293,9 +293,6 @@ Key concepts include:
 
 ---
 
-# AgentOps Control Tower
-
-...
 
 ## 🔄 Agent Governance Workflow
 

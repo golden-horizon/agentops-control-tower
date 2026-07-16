@@ -1,60 +1,23 @@
-## 🔄 Demo Workflow
+## 🔄 Agent Governance Workflow
 
-The example workflow below demonstrates how AgentOps Control Tower governs a high-risk AI agent action.
+```mermaid
+flowchart LR
+    A[AI Agent Runtime] --> B[AgentOps API]
+    B --> C{Policy Engine}
 
-```text
-┌───────────────────┐
-│   AI SOC Agent    │
-└─────────┬─────────┘
-          │
-          ▼
-┌───────────────────┐
-│ Requests Action   │
-│ Block IP Address  │
-└─────────┬─────────┘
-          │
-          ▼
-┌───────────────────┐
-│ Policy Engine     │
-│ Approval Required │
-└─────────┬─────────┘
-          │
-          ▼
-┌───────────────────┐
-│ Approval Queue    │
-│ Pending Review    │
-└─────────┬─────────┘
-          │
-          ▼
-┌───────────────────┐
-│ Human Approval    │
-│ Approved          │
-└─────────┬─────────┘
-          │
-          ▼
-┌───────────────────┐
-│ Action Executed   │
-│ Block IP          │
-└─────────┬─────────┘
-          │
-          ▼
-┌───────────────────┐
-│ Audit Log Created │
-└───────────────────┘
+    C -->|Allowed| D[Execute Action]
+    C -->|Approval Required| E[Approval Queue]
+    C -->|Blocked| F[Policy Violation]
+
+    E --> G[Human Reviewer]
+    G -->|Approve| D
+    G -->|Reject| H[Action Rejected]
+
+    D --> I[Activity Log]
+    F --> J[Policy Alerts]
+    H --> I
+    J --> I
+
+    A --> K[Heartbeat]
+    K --> L[Health Monitoring]
 ```
-
-### Governance Controls
-
-✅ Agent Registration
-
-✅ Policy Enforcement
-
-✅ Human Approval
-
-✅ Audit Logging
-
-✅ Activity Tracking
-
-✅ Risk Monitoring
-
-✅ Health Monitoring

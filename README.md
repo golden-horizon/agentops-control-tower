@@ -331,6 +331,52 @@ A --> L[Heartbeat]
 L --> M[Health Monitoring]
 ```
 
+## 📸 Screenshots
+
+### Command Centre Dashboard
+
+Overview of agent health, governance status, approvals, and operational metrics.
+
+![Dashboard Part 1](screenshots/screenshotsdashboard1.png)
+
+![Dashboard Part 2](screenshots/screenshotsdashboard2.png)
+
+---
+
+### Agent Inventory
+
+![Agent Inventory](screenshots/agents.png)
+
+---
+
+### Policy Management
+
+![Policies](screenshots/policies.png)
+
+---
+
+### Approval Workflow
+
+![Approvals](screenshots/approvals.png)
+
+---
+
+### Policy Alerts
+
+![Policy Alerts](screenshots/policy-alerts.png)
+
+---
+
+### Activity Monitoring
+
+![Activity](screenshots/activity.png)
+
+---
+
+### Audit Logs
+
+![Audit Logs](screenshots/audit-logs.png)
+
 ## 👨‍💻 Author
 
 ### Navid Ghobadpour

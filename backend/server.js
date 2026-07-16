@@ -11,7 +11,7 @@ app.use(
 
 app.use(express.json());
 
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 const VALID_AGENT_STATUSES = ["active", "disabled", "offline"];
 const VALID_INTEGRATION_STATUSES = ["connected", "demo", "disconnected"];
 const VALID_HEALTH_STATUSES = ["healthy", "delayed", "offline", "unknown"];
@@ -273,6 +273,13 @@ app.get("/", (req, res) => {
   res.json({
     application: "AgentOps Control Tower",
     status: "running"
+  });
+});
+
+app.get("/health", (req, res) => {
+  res.json({
+    status: "ok",
+    service: "agentops-api"
   });
 });
 
@@ -1690,6 +1697,37 @@ app.put("/api/approval-requests/:id/decision", async (req, res) => {
 });
 
 async function initializeDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS agents (
+      id SERIAL PRIMARY KEY,
+      agent_id VARCHAR(100) NOT NULL UNIQUE,
+      name VARCHAR(150) NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      agent_type VARCHAR(100) NOT NULL,
+      owner_name VARCHAR(100) NOT NULL DEFAULT '',
+      owner_team VARCHAR(100) NOT NULL DEFAULT '',
+      status VARCHAR(30) NOT NULL DEFAULT 'active',
+      integration_status VARCHAR(30) NOT NULL DEFAULT 'demo',
+      health_status VARCHAR(30) NOT NULL DEFAULT 'unknown',
+      last_seen TIMESTAMP,
+      response_time_ms INTEGER,
+      risk_score INTEGER NOT NULL DEFAULT 0,
+      endpoint_url TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT valid_agent_status
+        CHECK (status IN ('active', 'disabled', 'offline')),
+      CONSTRAINT valid_agent_integration_status
+        CHECK (integration_status IN ('connected', 'demo', 'disconnected')),
+      CONSTRAINT valid_agent_health_status
+        CHECK (health_status IN ('healthy', 'delayed', 'offline', 'unknown')),
+      CONSTRAINT valid_agent_risk_score
+        CHECK (risk_score BETWEEN 0 AND 100),
+      CONSTRAINT valid_agent_response_time
+        CHECK (response_time_ms IS NULL OR response_time_ms >= 0)
+    )
+  `);
+
   await pool.query(`
     ALTER TABLE agents
     ADD COLUMN IF NOT EXISTS health_status VARCHAR(30) NOT NULL DEFAULT 'unknown'

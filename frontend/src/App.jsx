@@ -1,14 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
+import ghLogo from "./assets/gh-logo.png";
 import {
   Activity,
   MoreVertical,
   ServerCog,
   ShieldAlert,
-  TowerControl,
   UserRound,
   X
 } from "lucide-react";
+
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV ? "http://localhost:5000" : "");
+const apiUrl = (path) => `${API_BASE_URL}${path}`;
 
 function displayValue(value, fallback = "Not specified") {
   return value === null || value === undefined || value === "" ? fallback : value;
@@ -202,7 +207,7 @@ function getRiskTier(score) {
 }
 
 async function fetchActivityLogs() {
-  const response = await fetch("http://localhost:5000/api/activity-logs");
+  const response = await fetch(apiUrl("/api/activity-logs"));
 
   if (!response.ok) {
     throw new Error("Could not load activity logs");
@@ -213,7 +218,7 @@ async function fetchActivityLogs() {
 
 async function fetchAgentPolicy(agentId) {
   const response = await fetch(
-    `http://localhost:5000/api/agents/${agentId}/policy`
+    apiUrl(`/api/agents/${agentId}/policy`)
   );
 
   if (!response.ok) {
@@ -292,8 +297,8 @@ function formatApprovalPayload(payload) {
 async function fetchApprovalRequests(filter) {
   const url =
     filter === "all"
-      ? "http://localhost:5000/api/approval-requests"
-      : `http://localhost:5000/api/approval-requests?status=${filter}`;
+      ? apiUrl("/api/approval-requests")
+      : apiUrl(`/api/approval-requests?status=${filter}`);
 
   const response = await fetch(url);
 
@@ -307,8 +312,8 @@ async function fetchApprovalRequests(filter) {
 async function fetchPolicyViolations(filter) {
   const url =
     filter === "all"
-      ? "http://localhost:5000/api/policy-violations"
-      : `http://localhost:5000/api/policy-violations?status=${filter}`;
+      ? apiUrl("/api/policy-violations")
+      : apiUrl(`/api/policy-violations?status=${filter}`);
 
   const response = await fetch(url);
 
@@ -383,7 +388,7 @@ function App() {
     }
 
     try {
-      const response = await fetch("http://localhost:5000/api/agents");
+      const response = await fetch(apiUrl("/api/agents"));
 
       if (!response.ok) {
         throw new Error("Could not load agents");
@@ -481,7 +486,7 @@ function App() {
 
     try {
       const endpointUrl = registerForm.endpoint_url.trim();
-      const response = await fetch("http://localhost:5000/api/agents", {
+      const response = await fetch(apiUrl("/api/agents"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -844,7 +849,7 @@ function App() {
   ) => {
     try {
       const response = await fetch(
-        `http://localhost:5000/api/agents/${agentId}/status`,
+        apiUrl(`/api/agents/${agentId}/status`),
         {
           method: "PUT",
           headers: {
@@ -963,7 +968,7 @@ function App() {
     try {
       const endpointUrl = agentForm.endpoint_url.trim();
       const response = await fetch(
-        `http://localhost:5000/api/agents/${selectedAgent.id}`,
+        apiUrl(`/api/agents/${selectedAgent.id}`),
         {
           method: "PUT",
           headers: {
@@ -1050,7 +1055,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://localhost:5000/api/agents/${selectedAgent.id}/policy`,
+        apiUrl(`/api/agents/${selectedAgent.id}/policy`),
         {
           method: "PUT",
           headers: {
@@ -1104,7 +1109,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://localhost:5000/api/approval-requests/${requestId}/decision`,
+        apiUrl(`/api/approval-requests/${requestId}/decision`),
         {
           method: "PUT",
           headers: {
@@ -1150,7 +1155,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://localhost:5000/api/policy-violations/${violationId}/status`,
+        apiUrl(`/api/policy-violations/${violationId}/status`),
         {
           method: "PUT",
           headers: {
@@ -1348,13 +1353,17 @@ function App() {
       <aside className="sidebar">
         <div className="brand">
            <div className="brand-mark" aria-hidden="true">
-                  <TowerControl size={34} strokeWidth={2.5} />
+                  <img
+                    className="brand-logo"
+                    src={ghLogo}
+                    alt=""
+                  />
            </div>
 
           <div className="brand-copy">
-          <h2>AgentOps</h2>
-          <span>Control Center</span>
-      </div>
+            <h2>AgentOps</h2>
+            <span>Control Center</span>
+          </div>
     </div>
 
         <nav className="sidebar-nav">
@@ -1547,7 +1556,7 @@ function App() {
 
             <div className="operations-map">
               <div className="tower-node">
-                <span>Control Tower</span>
+                <span>CONTROL TOWER</span>
                 <small>Policy and governance layer</small>
               </div>
 

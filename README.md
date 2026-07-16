@@ -10,6 +10,10 @@ AgentOps Control Tower acts as the command center for managing and governing AI 
 
 ---
 
+## Preview
+
+![Command Centre](screenshots/screenshotsdashboard1.png)
+
 ## 📸 Platform Overview
 
 ### Command Centre
